@@ -44,3 +44,26 @@ Este projeto já funciona em modo "local" (state em React). Para guardar **fotos
   - Se preferir privado, terá de gerar **Signed URLs** no frontend
 
 > Nota: neste momento o app já tenta subir as imagens para Storage quando as variáveis estão configuradas. A persistência completa (CRUD nas tabelas) fica pronta para a próxima iteração.
+
+## Arquivo digital e PostgreSQL
+
+O esquema PostgreSQL em `supabase/schema.sql` já inclui:
+
+- aliases/equivalências por fornecedor (`product_aliases`)
+- conversões de unidades (`unit_conversions`)
+- linhas estruturadas de fatura (`purchase_invoice_lines`)
+- arquivo digital (`digital_archive_documents`)
+- índices para pesquisa, unicidade, histórico e paginação
+
+No servidor, o disco 2 está montado em `/mnt/bunker`. Foi criada a pasta:
+
+`/mnt/bunker/resto`
+
+Subpastas:
+
+- `/mnt/bunker/resto/faturas`
+- `/mnt/bunker/resto/comprovativos`
+- `/mnt/bunker/resto/imports`
+- `/mnt/bunker/resto/tmp`
+
+Nota técnica: uma app Vite/React a correr no browser não consegue gravar diretamente em `/mnt/bunker/resto`. Para arquivo local real nesse disco, o próximo passo é criar uma API pequena no servidor que receba o ficheiro, grave no bunker e devolva o caminho para guardar em `digital_archive_documents`. Enquanto isso, a app mantém compatibilidade com Supabase Storage.

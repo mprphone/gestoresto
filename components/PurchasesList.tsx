@@ -1,6 +1,6 @@
 
 import React, { useMemo, useRef, useState } from 'react';
-import { Payment, PurchaseInvoice, InvoiceStatus } from '../types';
+import { DigitalArchiveDocument, Payment, Product, PurchaseInvoice, PurchaseInvoiceLine, InvoiceStatus } from '../types';
 import { 
   Calendar, 
   CreditCard, 
@@ -14,20 +14,25 @@ import {
   CheckSquare,
   Square,
   Layers,
-  ChevronRight,
-  ArrowRight
+  ArrowRight,
+  Eye,
+  Image as ImageIcon
 } from 'lucide-react';
 
 interface PurchasesListProps {
   invoices: PurchaseInvoice[];
+  invoiceLines: PurchaseInvoiceLine[];
+  products: Product[];
+  archiveDocuments: DigitalArchiveDocument[];
   payments: Payment[];
   onMarkAsPaid: (ids: string[], paymentDetails: { date: string, method: Payment['method'], account?: string, amount?: number, notes?: string, proofDataUrl?: string }) => void;
 }
 
-const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, payments, onMarkAsPaid }) => {
+const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, invoiceLines, products, archiveDocuments, payments, onMarkAsPaid }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | InvoiceStatus>('ALL');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [detailInvoiceId, setDetailInvoiceId] = useState<string | null>(null);
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
   
   // Payment Form States
@@ -46,6 +51,9 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, payments, onMar
   });
 
   const selectedInvoices = invoices.filter(inv => selectedIds.includes(inv.id));
+  const detailInvoice = invoices.find(inv => inv.id === detailInvoiceId);
+  const detailLines = detailInvoice ? invoiceLines.filter(line => line.invoiceId === detailInvoice.id).sort((a, b) => a.lineNumber - b.lineNumber) : [];
+  const detailDocument = detailInvoice ? archiveDocuments.find(doc => doc.id === detailInvoice.primaryArchiveDocumentId || doc.invoiceId === detailInvoice.id) : undefined;
   const totalSelectedAmount = selectedInvoices.reduce((acc, curr) => acc + curr.totalAmount, 0);
 
   const totalPending = useMemo(() => {
@@ -225,6 +233,14 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, payments, onMar
                     )}
                   </td>
                   <td className="px-6 py-4 text-right">
+                    <div className="flex justify-end gap-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setDetailInvoiceId(inv.id); }}
+                      className="p-2.5 bg-white text-slate-500 border border-slate-200 rounded-xl hover:border-orange-500 hover:text-orange-600 transition-all shadow-sm"
+                      title="Ver fatura"
+                    >
+                      <Eye size={16} />
+                    </button>
                     {!isPaid ? (
                       <button 
                         onClick={(e) => { e.stopPropagation(); setSelectedIds([inv.id]); setIsPayModalOpen(true); }}
@@ -235,6 +251,7 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, payments, onMar
                     ) : (
                       <button className="p-2 text-slate-200 cursor-default"><CheckCircle2 size={20} /></button>
                     )}
+                    </div>
                   </td>
                 </tr>
               );
@@ -248,6 +265,101 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, payments, onMar
           </div>
         )}
       </div>
+
+      {detailInvoice && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-8 bg-slate-900 text-white flex justify-between items-start gap-6">
+              <div>
+                <h3 className="text-2xl font-black italic tracking-tight uppercase">{detailInvoice.supplierName}</h3>
+                <p className="text-xs font-bold text-white/40 uppercase tracking-widest mt-1">{detailInvoice.docNumber} - {new Date(detailInvoice.date).toLocaleDateString()}</p>
+              </div>
+              <button onClick={() => setDetailInvoiceId(null)} className="p-3 bg-white/10 hover:bg-white/20 rounded-full transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 overflow-y-auto">
+              <div className="lg:col-span-7 p-8 space-y-5">
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total</p>
+                    <p className="text-xl font-black text-slate-900">€ {detailInvoice.totalAmount.toFixed(2)}</p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pago</p>
+                    <p className="text-xl font-black text-emerald-600">€ {(detailInvoice.paidAmount || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Linhas</p>
+                    <p className="text-xl font-black text-orange-600">{detailLines.length}</p>
+                  </div>
+                </div>
+
+                <div className="border border-slate-200 rounded-3xl overflow-hidden">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-widest">
+                      <tr>
+                        <th className="px-4 py-4">Linha</th>
+                        <th className="px-4 py-4">Artigo</th>
+                        <th className="px-4 py-4">Original</th>
+                        <th className="px-4 py-4">Stock</th>
+                        <th className="px-4 py-4 text-right">Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {detailLines.map(line => {
+                        const product = products.find(p => p.id === line.productId);
+                        return (
+                          <tr key={line.id}>
+                            <td className="px-4 py-4 text-xs font-black text-slate-400">{line.lineNumber}</td>
+                            <td className="px-4 py-4">
+                              <p className="text-xs font-black text-slate-900">{product?.name || 'Artigo removido'}</p>
+                              <p className="text-[9px] font-bold text-slate-400 uppercase">{product?.category || 'Sem família'}</p>
+                            </td>
+                            <td className="px-4 py-4">
+                              <p className="text-xs font-bold text-slate-700">{line.originalName}</p>
+                              <p className="text-[9px] font-bold text-slate-400">{line.quantityOriginal} {line.unitOriginal} x {line.conversionFactor}</p>
+                            </td>
+                            <td className="px-4 py-4 text-xs font-black text-slate-900">{line.quantityStock.toFixed(3)} {line.unitStock}</td>
+                            <td className="px-4 py-4 text-right text-xs font-black text-slate-900">€ {line.totalPrice.toFixed(2)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {detailLines.length === 0 && (
+                    <div className="p-12 text-center text-slate-300">
+                      <FileText size={40} className="mx-auto mb-3 opacity-20" />
+                      <p className="text-[10px] font-black uppercase tracking-widest">Sem linhas estruturadas guardadas.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="lg:col-span-5 bg-slate-50 p-8 border-l border-slate-100">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><ImageIcon size={14} /> Arquivo Digital</h4>
+                {detailDocument?.publicUrl || detailInvoice.photoUrl ? (
+                  <div className="space-y-4">
+                    <div className="aspect-[3/4] rounded-3xl overflow-hidden border border-slate-200 bg-white">
+                      <img src={detailDocument?.publicUrl || detailInvoice.photoUrl} className="w-full h-full object-contain" />
+                    </div>
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-2">
+                      <p className="text-[10px] font-bold text-slate-500"><span className="font-black uppercase text-slate-400">Storage:</span> {detailDocument?.storageProvider || 'local'}</p>
+                      <p className="text-[10px] font-bold text-slate-500 break-all"><span className="font-black uppercase text-slate-400">Caminho:</span> {detailDocument?.storagePath || 'sem caminho'}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-16 text-center bg-white rounded-3xl border border-dashed border-slate-200 text-slate-300">
+                    <ImageIcon size={48} className="mx-auto mb-4 opacity-20" />
+                    <p className="text-[10px] font-black uppercase tracking-widest">Sem documento arquivado.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* FLOATING ACTION BAR FOR MULTIPLE SELECTION */}
       {selectedIds.length > 0 && (

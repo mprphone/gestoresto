@@ -9,9 +9,12 @@ export interface InvoiceExtractedData {
   invoiceNumber?: string;
   items: {
     name: string;
+    supplierItemCode?: string;
     quantity: number;
+    unit?: string;
     unitPrice: number;
     totalPrice: number;
+    vatRate?: number;
     category: string;
     expiryDate?: string;
   }[];
@@ -40,7 +43,7 @@ export const processInvoiceImage = async (base64Images: string[]): Promise<Invoi
         parts: [
           ...imageParts,
           { text: `Analise estas imagens de faturas para um restaurante. 
-          Extraia: Fornecedor, NIF, Nº Fatura, Itens (nome, qtd, preço un., total, categoria/família sugerida).
+          Extraia: Fornecedor, NIF, Nº Fatura, Itens (nome, código de artigo se existir, qtd, unidade, preço un., total, IVA, categoria/família sugerida).
           
           VALIDAÇÃO TÉCNICA/LEGAL:
           1. Avalie a qualidade da imagem: Está nítida e legível para arquivo digital legal (imageQualityOk)?
@@ -64,14 +67,17 @@ export const processInvoiceImage = async (base64Images: string[]): Promise<Invoi
               type: Type.ARRAY,
               items: {
                 type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING },
-                  quantity: { type: Type.NUMBER },
-                  unitPrice: { type: Type.NUMBER },
-                  totalPrice: { type: Type.NUMBER },
-                  category: { type: Type.STRING },
-                  expiryDate: { type: Type.STRING }
-                },
+                  properties: {
+                    name: { type: Type.STRING },
+                    supplierItemCode: { type: Type.STRING },
+                    quantity: { type: Type.NUMBER },
+                    unit: { type: Type.STRING },
+                    unitPrice: { type: Type.NUMBER },
+                    totalPrice: { type: Type.NUMBER },
+                    vatRate: { type: Type.NUMBER },
+                    category: { type: Type.STRING },
+                    expiryDate: { type: Type.STRING }
+                  },
                 required: ["name", "quantity", "unitPrice"]
               }
             },

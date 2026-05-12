@@ -2,23 +2,35 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Upload, Check, Loader2, X, QrCode, FileWarning, PlusCircle, RefreshCcw, Layers, AlertCircle, Copy, Image as ImageIcon, ChevronRight, Edit3 } from 'lucide-react';
 import { processInvoiceImage, InvoiceExtractedData } from '../geminiService';
-import { Product, Category, Supplier, PurchaseInvoice } from '../types';
+import { Product, Category, Supplier, PurchaseInvoice, ProductAlias, StockEntryLineInput } from '../types';
 
 interface StockEntryProps {
   products: Product[];
   suppliers: Supplier[];
   invoices: PurchaseInvoice[];
+  productAliases: ProductAlias[];
   categories: Category[];
-  onComplete: (items: any[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any) => void;
+  onComplete: (items: StockEntryLineInput[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any) => void;
   onQuickCreateProduct: (data: any) => Product;
 }
 
-const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, categories, onComplete, onQuickCreateProduct }) => {
+const normalizeText = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, productAliases, categories, onComplete, onQuickCreateProduct }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [pages, setPages] = useState<string[]>([]);
   const [extractedData, setExtractedData] = useState<InvoiceExtractedData | null>(null);
   const [mapping, setMapping] = useState<Record<number, string>>({}); 
+  const [aliasMapping, setAliasMapping] = useState<Record<number, string>>({});
   const [itemFamilies, setItemFamilies] = useState<Record<number, Category>>({});
+  const [unitOriginals, setUnitOriginals] = useState<Record<number, string>>({});
+  const [conversionFactors, setConversionFactors] = useState<Record<number, number>>({});
   const [supplier, setSupplier] = useState('');
   const [nif, setNif] = useState('');
   const [docNumber, setDocNumber] = useState('');
@@ -70,11 +82,27 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         if (existingCat) family = existingCat;
         initialFamilies[idx] = family;
 
-        const match = products.find(p => (p.name || '').toLowerCase() === (item.name || '').toLowerCase());
+        const currentSupplier = suppliers.find(s => s.nif === data.supplierNif);
+        const aliasMatch = currentSupplier
+          ? productAliases.find(alias =>
+              alias.supplierId === currentSupplier.id &&
+              normalizeText(alias.supplierItemName) === normalizeText(item.name || '')
+            )
+          : undefined;
+        const match = aliasMatch
+          ? products.find(p => p.id === aliasMatch.productId)
+          : products.find(p => normalizeText(p.name || '') === normalizeText(item.name || ''));
+
         if (match) {
           autoMap[idx] = match.id;
           initialFamilies[idx] = match.category;
+          if (aliasMatch) {
+            setAliasMapping(prev => ({ ...prev, [idx]: aliasMatch.id }));
+            setConversionFactors(prev => ({ ...prev, [idx]: aliasMatch.conversionFactor || 1 }));
+          }
         }
+        setUnitOriginals(prev => ({ ...prev, [idx]: item.unit || match?.unit || 'un' }));
+        setConversionFactors(prev => ({ ...prev, [idx]: prev[idx] || 1 }));
       });
       setMapping(autoMap);
       setItemFamilies(initialFamilies);
@@ -99,12 +127,23 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
   const confirmEntry = () => {
     if (extractedData && !isDuplicate) {
-      const itemsToSubmit = extractedData.items.map((item, idx) => ({
-        ...item,
-        productId: mapping[idx],
-        officialName: products.find(p => p.id === mapping[idx])?.name || item.name
-      }));
-      onComplete(itemsToSubmit, `data:image/jpeg;base64,${pages[0]}`, { name: supplier, nif }, { docNumber, totalAmount: extractedData.totalInvoiceAmount });
+      const itemsToSubmit: StockEntryLineInput[] = extractedData.items.map((item, idx) => {
+        const product = products.find(p => p.id === mapping[idx]);
+        const factor = conversionFactors[idx] || 1;
+        return {
+          ...item,
+          productId: mapping[idx],
+          aliasId: aliasMapping[idx],
+          officialName: product?.name || item.name,
+          supplierItemCode: item.supplierItemCode,
+          unitOriginal: unitOriginals[idx] || item.unit || product?.unit || 'un',
+          conversionFactor: factor,
+          quantityStock: item.quantity * factor,
+          unitStock: product?.unit || unitOriginals[idx] || 'un',
+          vatRate: item.vatRate
+        };
+      });
+      onComplete(itemsToSubmit, `data:image/jpeg;base64,${pages[0]}`, { name: supplier, nif }, { docNumber, totalAmount: extractedData.totalInvoiceAmount, digitalCompliance: extractedData.digitalCompliance });
     }
   };
 
@@ -160,10 +199,13 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                             const isMapped = !!mapping[idx];
                             const currentFamily = itemFamilies[idx] || 'Outros';
                             const filteredProducts = products.filter(p => p.category === currentFamily);
+                            const selectedProduct = products.find(p => p.id === mapping[idx]);
+                            const factor = conversionFactors[idx] || 1;
+                            const stockQty = item.quantity * factor;
                             return (
                               <div key={idx} className={`p-6 rounded-[2rem] border transition-all ${isMapped ? 'bg-white border-slate-100 shadow-sm' : 'bg-orange-50 border-orange-100'}`}>
                                 <div className="flex flex-col md:flex-row gap-6">
-                                  <div className="md:w-1/3"><p className="text-[8px] font-black text-slate-400 uppercase mb-1">Na Fatura:</p><p className="text-xs font-black text-slate-800 line-clamp-2">{item.name}</p><div className="mt-2 text-[10px] font-black text-slate-900">€ {item.totalPrice.toFixed(2)}</div></div>
+                                  <div className="md:w-1/3"><p className="text-[8px] font-black text-slate-400 uppercase mb-1">Na Fatura:</p><p className="text-xs font-black text-slate-800 line-clamp-2">{item.name}</p><div className="mt-2 text-[10px] font-black text-slate-900">€ {item.totalPrice.toFixed(2)}</div><p className="text-[9px] font-bold text-slate-400 mt-1">{item.quantity} {item.unit || 'un'}</p></div>
                                   <div className="flex-1 space-y-4">
                                      <div className="space-y-1"><label className="text-[8px] font-black text-slate-400 uppercase">1. Escolher Família</label><select className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase outline-none" value={currentFamily} onChange={(e) => { setItemFamilies(prev => ({ ...prev, [idx]: e.target.value })); setMapping(prev => { const n = {...prev}; delete n[idx]; return n; }); }}>{categories.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
                                      <div className="space-y-2"><label className="text-[8px] font-black text-slate-400 uppercase">2. Associar ao Inventário</label>
@@ -175,6 +217,20 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                                              <button onClick={() => setMapping(prev => ({ ...prev, [idx]: onQuickCreateProduct({ name: item.name, category: currentFamily }).id }))} className="px-4 py-3 bg-slate-900 text-white text-[10px] font-black uppercase rounded-xl hover:bg-orange-500 transition-all flex items-center gap-2"><PlusCircle size={14} /> Criar Novo</button>
                                           </div>
                                         )}
+                                     </div>
+                                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                       <div className="space-y-1">
+                                         <label className="text-[8px] font-black text-slate-400 uppercase">Unid. Fatura</label>
+                                         <input className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase outline-none" value={unitOriginals[idx] || item.unit || 'un'} onChange={(e) => setUnitOriginals(prev => ({ ...prev, [idx]: e.target.value }))} />
+                                       </div>
+                                       <div className="space-y-1">
+                                         <label className="text-[8px] font-black text-slate-400 uppercase">Fator</label>
+                                         <input type="number" step="0.001" min="0.001" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase outline-none" value={factor} onChange={(e) => setConversionFactors(prev => ({ ...prev, [idx]: Number(e.target.value) || 1 }))} />
+                                       </div>
+                                       <div className="space-y-1">
+                                         <label className="text-[8px] font-black text-slate-400 uppercase">Entra Stock</label>
+                                         <div className="px-3 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase">{stockQty.toFixed(3)} {selectedProduct?.unit || 'un'}</div>
+                                       </div>
                                      </div>
                                   </div>
                                 </div>

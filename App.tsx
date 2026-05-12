@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Category, Product, Movement, MovementType, Batch, Supplier, PurchaseInvoice, InvoiceStatus, DefaultCategories, Payment } from './types';
+import { ArchiveDocumentType, Category, Product, Movement, MovementType, Batch, Supplier, PurchaseInvoice, InvoiceStatus, DefaultCategories, Payment, ProductAlias, PurchaseInvoiceLine, DigitalArchiveDocument, StockEntryLineInput } from './types';
 import { uploadDataUrlToSupabase } from './supabaseStorage';
 import Dashboard from './components/Dashboard';
 import InventoryList from './components/InventoryList';
@@ -36,8 +36,11 @@ const App: React.FC = () => {
   ]);
 
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
+  const [invoiceLines, setInvoiceLines] = useState<PurchaseInvoiceLine[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
+  const [productAliases, setProductAliases] = useState<ProductAlias[]>([]);
+  const [archiveDocuments, setArchiveDocuments] = useState<DigitalArchiveDocument[]>([]);
   const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance'>('dash');
 
   const handleCreateProduct = (data: any) => {
@@ -71,7 +74,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleStockEntry = async (items: any[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any) => {
+  const handleStockEntry = async (items: StockEntryLineInput[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any) => {
     const isDup = invoices.some(inv => inv.docNumber === invoiceData.docNumber && inv.supplierNif === supplierData.nif);
     if (isDup) {
       alert("Aviso: Esta fatura já foi registada anteriormente!");
@@ -91,19 +94,98 @@ const App: React.FC = () => {
     // Se houver Supabase configurado, tentamos subir a foto para Storage e guardar URL.
     const storedInvoicePhotoUrl = photoUrl ? await uploadDataUrlToSupabase(photoUrl, `invoices/${invoiceData?.docNumber || 'sn'}-${Date.now()}.jpg`) : undefined;
 
+    const invoiceId = Math.random().toString(36).substr(2, 9);
+    const archiveDocumentId = photoUrl ? Math.random().toString(36).substr(2, 9) : undefined;
     const newInvoice: PurchaseInvoice = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: invoiceId,
       supplierId: targetSupplier?.id || 'manual',
       supplierName: targetSupplier?.name || supplierData?.name || 'Manual',
       supplierNif: supplierData?.nif || '',
       docNumber: invoiceData?.docNumber || 'S/N',
       totalAmount: invoiceData?.totalAmount || 0,
       date: new Date().toISOString(),
+      dueDate: new Date(Date.now() + ((targetSupplier?.paymentTermsDays || 30) * 86400000)).toISOString(),
       status: InvoiceStatus.PENDING,
       photoUrl: storedInvoicePhotoUrl || photoUrl,
+      primaryArchiveDocumentId: archiveDocumentId,
+      digitalCompliance: invoiceData?.digitalCompliance,
       paidAmount: 0
     };
     setInvoices(prev => [newInvoice, ...prev]);
+
+    if (photoUrl && archiveDocumentId) {
+      const archiveDoc: DigitalArchiveDocument = {
+        id: archiveDocumentId,
+        documentType: ArchiveDocumentType.INVOICE,
+        invoiceId,
+        supplierId: targetSupplier?.id,
+        originalFilename: `${invoiceData?.docNumber || 'sn'}.jpg`,
+        mimeType: 'image/jpeg',
+        storageProvider: storedInvoicePhotoUrl ? 'supabase' : 'bunker',
+        storageBucket: storedInvoicePhotoUrl ? (((import.meta as any).env.VITE_SUPABASE_BUCKET as string | undefined) || 'gestoresto') : undefined,
+        storagePath: storedInvoicePhotoUrl ? `invoices/${invoiceData?.docNumber || 'sn'}-${Date.now()}.jpg` : `/mnt/bunker/resto/faturas/${supplierData?.nif || 'sem-nif'}-${invoiceData?.docNumber || 'sn'}.jpg`,
+        publicUrl: storedInvoicePhotoUrl || photoUrl,
+        localRoot: '/mnt/bunker/resto',
+        pageCount: 1,
+        qualityOk: invoiceData?.digitalCompliance?.imageQualityOk,
+        hasQrCode: invoiceData?.digitalCompliance?.hasQrCode,
+        hasAtcud: invoiceData?.digitalCompliance?.hasAtcud,
+        atcud: invoiceData?.digitalCompliance?.atcud,
+        notes: invoiceData?.digitalCompliance?.complianceNotes,
+        createdAt: new Date().toISOString()
+      };
+      setArchiveDocuments(prev => [archiveDoc, ...prev]);
+    }
+
+    const newLines: PurchaseInvoiceLine[] = items.map((item, idx) => {
+      const product = products.find(p => p.id === item.productId);
+      return {
+        id: Math.random().toString(36).substr(2, 9),
+        invoiceId,
+        lineNumber: idx + 1,
+        productId: item.productId,
+        productAliasId: item.aliasId,
+        originalName: item.name,
+        supplierItemCode: item.supplierItemCode,
+        quantityOriginal: item.quantity,
+        unitOriginal: item.unitOriginal || item.unitStock || product?.unit || 'un',
+        conversionFactor: item.conversionFactor || 1,
+        quantityStock: item.quantityStock ?? item.quantity,
+        unitStock: item.unitStock || product?.unit || 'un',
+        unitPrice: item.unitPrice,
+        totalPrice: item.totalPrice,
+        vatRate: item.vatRate,
+        expiryDate: item.expiryDate
+      };
+    });
+    setInvoiceLines(prev => [...newLines, ...prev]);
+
+    const learnedAliases = items.reduce<ProductAlias[]>((acc, item) => {
+      const product = products.find(p => p.id === item.productId);
+      if (!targetSupplier || !product) return acc;
+      const exists = productAliases.some(alias =>
+        alias.supplierId === targetSupplier!.id &&
+        alias.supplierItemName.trim().toLowerCase() === item.name.trim().toLowerCase()
+      );
+      if (!exists) {
+        acc.push({
+          id: Math.random().toString(36).substr(2, 9),
+          supplierId: targetSupplier.id,
+          productId: product.id,
+          supplierItemName: item.name,
+          supplierItemCode: item.supplierItemCode,
+          supplierUnit: item.unitOriginal,
+          productUnit: product.unit,
+          conversionFactor: item.conversionFactor || 1,
+          confidence: 100,
+          lastSeenAt: new Date().toISOString()
+        });
+      }
+      return acc;
+    }, []);
+    if (learnedAliases.length) {
+      setProductAliases(prev => [...learnedAliases, ...prev]);
+    }
 
     const newMovements: Movement[] = [];
     setProducts(prevProducts => {
@@ -112,14 +194,15 @@ const App: React.FC = () => {
         const idx = updated.findIndex(p => p.id === item.productId);
         if (idx > -1) {
           const p = updated[idx];
+          const quantityStock = item.quantityStock ?? item.quantity;
           const currentTotalValue = p.currentStock * p.averagePrice;
           const newItemsValue = item.quantity * item.unitPrice;
-          const totalQty = p.currentStock + item.quantity;
+          const totalQty = p.currentStock + quantityStock;
           const newPMP = totalQty > 0 ? (currentTotalValue + newItemsValue) / totalQty : item.unitPrice;
           
           updated[idx] = { 
             ...p, 
-            currentStock: totalQty, 
+            currentStock: totalQty,
             averagePrice: newPMP, 
             lastUpdated: new Date().toISOString() 
           };
@@ -128,7 +211,7 @@ const App: React.FC = () => {
             id: Math.random().toString(36).substr(2, 9),
             productId: p.id,
             type: MovementType.ENTRY,
-            quantity: item.quantity,
+            quantity: quantityStock,
             price: item.unitPrice,
             date: new Date().toISOString(),
             notes: `Entrada via Fatura ${invoiceData?.docNumber || ''}`,
@@ -264,9 +347,9 @@ const App: React.FC = () => {
           {activeTab === 'dash' && <Dashboard products={products} movements={movements} />}
           {activeTab === 'inv' && <InventoryList products={products} movements={movements} categories={categories} />}
           {activeTab === 'move' && <StockMovement products={products} movements={movements} onTransfer={handleStockMovement} categories={categories} />}
-          {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} />}
+          {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} productAliases={productAliases} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} />}
           {activeTab === 'suppliers' && <SupplierManagement suppliers={suppliers} />}
-          {activeTab === 'finance' && <PurchasesList invoices={invoices} payments={payments} onMarkAsPaid={handleMarkAsPaid} />}
+          {activeTab === 'finance' && <PurchasesList invoices={invoices} invoiceLines={invoiceLines} products={products} archiveDocuments={archiveDocuments} payments={payments} onMarkAsPaid={handleMarkAsPaid} />}
           {activeTab === 'catalog' && (
             <ProductCatalog 
               products={products} 

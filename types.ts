@@ -29,6 +29,8 @@ export interface Supplier {
   nif: string;
   email?: string;
   phone?: string;
+  paymentTermsDays?: number;
+  notes?: string;
 }
 
 export interface PurchaseInvoice {
@@ -39,9 +41,12 @@ export interface PurchaseInvoice {
   docNumber: string;
   totalAmount: number;
   date: string;
+  dueDate?: string;
   status: InvoiceStatus;
   /** URL da foto/scan da fatura (ideal: Supabase Storage) */
   photoUrl?: string;
+  primaryArchiveDocumentId?: string;
+  digitalCompliance?: InvoiceDigitalCompliance;
   /** Total já liquidado (para pagamentos parciais) */
   paidAmount?: number;
   /** Metadados do último pagamento */
@@ -50,6 +55,36 @@ export interface PurchaseInvoice {
   lastPaymentAccount?: string;
   /** URL do comprovativo (transferência, recibo, etc.) */
   proofUrl?: string;
+}
+
+export interface InvoiceDigitalCompliance {
+  hasQrCode?: boolean;
+  hasAtcud?: boolean;
+  atcud?: string;
+  isCompliant?: boolean;
+  imageQualityOk?: boolean;
+  complianceNotes?: string;
+  isMissingPages?: boolean;
+}
+
+export interface PurchaseInvoiceLine {
+  id: string;
+  invoiceId: string;
+  lineNumber: number;
+  productId: string;
+  productAliasId?: string;
+  originalName: string;
+  supplierItemCode?: string;
+  quantityOriginal: number;
+  unitOriginal: string;
+  conversionFactor: number;
+  quantityStock: number;
+  unitStock: string;
+  unitPrice: number;
+  totalPrice: number;
+  vatRate?: number;
+  expiryDate?: string;
+  notes?: string;
 }
 
 export interface Payment {
@@ -62,6 +97,7 @@ export interface Payment {
   account?: string;
   notes?: string;
   proofUrl?: string;
+  archiveDocumentId?: string;
 }
 
 export interface Product {
@@ -73,6 +109,76 @@ export interface Product {
   averagePrice: number;
   minStock: number;
   lastUpdated: string;
+}
+
+export interface UnitConversion {
+  id: string;
+  fromUnit: string;
+  toUnit: string;
+  factor: number;
+  description?: string;
+}
+
+export interface ProductAlias {
+  id: string;
+  supplierId: string;
+  productId: string;
+  supplierItemName: string;
+  supplierItemCode?: string;
+  supplierUnit?: string;
+  productUnit: string;
+  conversionFactor: number;
+  confidence?: number;
+  lastSeenAt?: string;
+}
+
+export enum ArchiveDocumentType {
+  INVOICE = 'FATURA',
+  PAYMENT_PROOF = 'COMPROVATIVO',
+  GUIDE = 'GUIA',
+  OTHER = 'OUTRO'
+}
+
+export interface DigitalArchiveDocument {
+  id: string;
+  documentType: ArchiveDocumentType;
+  invoiceId?: string;
+  paymentId?: string;
+  supplierId?: string;
+  originalFilename?: string;
+  mimeType?: string;
+  byteSize?: number;
+  sha256?: string;
+  storageProvider: 'bunker' | 'supabase';
+  storageBucket?: string;
+  storagePath: string;
+  publicUrl?: string;
+  localRoot: string;
+  pageCount: number;
+  qualityOk?: boolean;
+  hasQrCode?: boolean;
+  hasAtcud?: boolean;
+  atcud?: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface StockEntryLineInput {
+  productId: string;
+  aliasId?: string;
+  name: string;
+  officialName?: string;
+  supplierItemCode?: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  category?: string;
+  unitOriginal?: string;
+  conversionFactor?: number;
+  quantityStock?: number;
+  unitStock?: string;
+  vatRate?: number;
+  expiryDate?: string;
 }
 
 export interface Batch {
