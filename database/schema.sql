@@ -20,6 +20,16 @@ do $$ begin
 exception when duplicate_object then null;
 end $$;
 
+do $$ begin
+  create type app_role as enum ('admin','compras','cozinha','financeiro');
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create type email_status as enum ('PENDENTE','ENVIADO','FALHOU','SIMULADO');
+exception when duplicate_object then null;
+end $$;
+
 -- Texto normalizado para chaves de pesquisa/alias.
 create or replace function normalize_search_text(value text)
 returns text
@@ -94,6 +104,57 @@ create trigger products_touch_updated_at
 before update on products
 for each row execute function touch_updated_at();
 
+create table if not exists app_users (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  email text not null,
+  password_hash text not null,
+  role app_role not null default 'compras',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists app_users_email_unique on app_users (lower(email));
+create index if not exists app_users_active_role_idx on app_users (is_active, role);
+
+drop trigger if exists app_users_touch_updated_at on app_users;
+create trigger app_users_touch_updated_at
+before update on app_users
+for each row execute function touch_updated_at();
+
+create table if not exists audit_log (
+  id bigserial primary key,
+  user_id uuid references app_users(id) on delete set null,
+  actor_name text,
+  action text not null,
+  entity_table text not null,
+  entity_id text,
+  before_data jsonb,
+  after_data jsonb,
+  request_id uuid default gen_random_uuid(),
+  created_at timestamptz not null default now()
+);
+create index if not exists audit_log_entity_idx on audit_log (entity_table, entity_id, created_at desc);
+create index if not exists audit_log_user_date_idx on audit_log (user_id, created_at desc);
+create index if not exists audit_log_action_date_idx on audit_log (action, created_at desc);
+
+create table if not exists email_messages (
+  id uuid primary key default gen_random_uuid(),
+  recipient text not null,
+  subject text not null,
+  body text not null,
+  status email_status not null default 'PENDENTE',
+  related_entity_table text,
+  related_entity_id text,
+  provider_message_id text,
+  error_message text,
+  sent_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists email_messages_status_date_idx on email_messages (status, created_at desc);
+create index if not exists email_messages_recipient_date_idx on email_messages (recipient, created_at desc);
+create index if not exists email_messages_related_idx on email_messages (related_entity_table, related_entity_id);
+
 -- Conversões genéricas entre unidades. Ex: cx -> un com fator 6.
 create table if not exists unit_conversions (
   id uuid primary key default gen_random_uuid(),
@@ -104,6 +165,28 @@ create table if not exists unit_conversions (
   created_at timestamptz not null default now()
 );
 create unique index if not exists unit_conversions_unique on unit_conversions (from_unit, to_unit);
+
+-- Conversões específicas têm precedência sobre conversões globais.
+-- Ex: fornecedor A vende "cx" de vinho com 6 un, fornecedor B vende "cx" de cerveja com 24 un.
+create table if not exists product_unit_conversions (
+  id uuid primary key default gen_random_uuid(),
+  product_id uuid not null references products(id) on delete cascade,
+  supplier_id uuid references suppliers(id) on delete cascade,
+  from_unit text not null,
+  to_unit text not null,
+  factor numeric(18,6) not null check (factor > 0),
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists product_unit_conversions_unique
+  on product_unit_conversions (product_id, coalesce(supplier_id, '00000000-0000-0000-0000-000000000000'::uuid), from_unit, to_unit);
+create index if not exists product_unit_conversions_lookup_idx on product_unit_conversions (product_id, supplier_id, from_unit, to_unit);
+
+drop trigger if exists product_unit_conversions_touch_updated_at on product_unit_conversions;
+create trigger product_unit_conversions_touch_updated_at
+before update on product_unit_conversions
+for each row execute function touch_updated_at();
 
 -- Equivalências por fornecedor. É aqui que "Tomate Cherry 250g" aprende que é "Tomate Cereja".
 create table if not exists product_aliases (
@@ -269,3 +352,11 @@ create index if not exists movements_type_date_idx on movements (type, date_move
 
 -- Helpers para paginação por cursor (date/id), usados pelo frontend.
 -- Exemplo: where (date_issued, id) < (:cursor_date, :cursor_id) order by date_issued desc, id desc limit 50
+
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'ubuntu') then
+    grant all privileges on all tables in schema public to ubuntu;
+    grant all privileges on all sequences in schema public to ubuntu;
+    grant execute on all functions in schema public to ubuntu;
+  end if;
+end $$;

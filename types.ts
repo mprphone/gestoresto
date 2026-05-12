@@ -43,7 +43,7 @@ export interface PurchaseInvoice {
   date: string;
   dueDate?: string;
   status: InvoiceStatus;
-  /** URL da foto/scan da fatura (ideal: Supabase Storage) */
+  /** URL local servida pela API para foto/scan da fatura */
   photoUrl?: string;
   primaryArchiveDocumentId?: string;
   digitalCompliance?: InvoiceDigitalCompliance;
@@ -149,7 +149,7 @@ export interface DigitalArchiveDocument {
   mimeType?: string;
   byteSize?: number;
   sha256?: string;
-  storageProvider: 'bunker' | 'supabase';
+  storageProvider: 'bunker';
   storageBucket?: string;
   storagePath: string;
   publicUrl?: string;

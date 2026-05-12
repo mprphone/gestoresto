@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 import multer from 'multer';
 import { query } from '../db.js';
@@ -47,6 +48,22 @@ archiveRouter.get('/invoice/:invoiceId', async (req, res, next) => {
   }
 });
 
+archiveRouter.get('/file/:id', async (req, res, next) => {
+  try {
+    const result = await query('select storage_path, mime_type, original_filename from digital_archive_documents where id = $1', [req.params.id]);
+    const doc = result.rows[0];
+    if (!doc || !doc.storage_path || !fsSync.existsSync(doc.storage_path)) {
+      res.status(404).json({ error: 'document not found' });
+      return;
+    }
+    res.setHeader('Content-Type', doc.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${doc.original_filename || 'documento'}"`);
+    fsSync.createReadStream(doc.storage_path).pipe(res);
+  } catch (error) {
+    next(error);
+  }
+});
+
 archiveRouter.post('/upload', upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) {
@@ -86,7 +103,13 @@ archiveRouter.post('/upload', upload.single('file'), async (req, res, next) => {
       req.body.hasAtcud, req.body.atcud || null, req.body.notes || null
     ]);
 
-    res.status(201).json(result.rows[0]);
+    const saved = result.rows[0];
+    const withUrl = await query(
+      'update digital_archive_documents set public_url = $1 where id = $2 returning *',
+      [`/api/archive/file/${saved.id}`, saved.id]
+    );
+
+    res.status(201).json(withUrl.rows[0]);
   } catch (error) {
     next(error);
   }

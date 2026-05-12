@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query, withTransaction } from '../db.js';
 import { pageRange, pageResult } from '../pagination.js';
+import { audit } from '../audit.js';
 
 export const invoicesRouter = Router();
 
@@ -38,6 +39,27 @@ invoicesRouter.post('/', async (req, res, next) => {
   try {
     const payload = req.body;
     const saved = await withTransaction(async client => {
+      let supplierId = payload.supplierId || null;
+      if (!supplierId && payload.supplierNif) {
+        const supplier = await client.query(`
+          insert into suppliers (name, nif, email, phone, payment_terms_days)
+          values ($1, $2, $3, $4, coalesce($5, 30))
+          on conflict (nif) do update set
+            name = excluded.name,
+            email = coalesce(excluded.email, suppliers.email),
+            phone = coalesce(excluded.phone, suppliers.phone)
+          returning *
+        `, [
+          payload.supplierName || 'Fornecedor',
+          payload.supplierNif,
+          payload.supplierEmail || null,
+          payload.supplierPhone || null,
+          payload.paymentTermsDays || 30
+        ]);
+        supplierId = supplier.rows[0].id;
+        await audit(client, req, 'upsert', 'suppliers', supplierId, null, supplier.rows[0]);
+      }
+
       const invoice = await client.query(`
         insert into purchase_invoices (
           supplier_id, supplier_name, supplier_nif, doc_number, total_amount,
@@ -46,15 +68,40 @@ invoicesRouter.post('/', async (req, res, next) => {
           image_quality_ok, is_missing_pages, compliance_notes
         )
         values ($1, $2, $3, $4, $5, coalesce($6, current_date), $7, coalesce($8, 'PENDENTE'), coalesce($9, 0), $10, $11, $12, $13, $14, $15, $16, $17)
+        on conflict (supplier_nif, doc_number) do nothing
         returning *
       `, [
-        payload.supplierId, payload.supplierName, payload.supplierNif, payload.docNumber, payload.totalAmount,
+        supplierId, payload.supplierName, payload.supplierNif, payload.docNumber, payload.totalAmount,
         payload.dateIssued, payload.dueDate, payload.status, payload.paidAmount, payload.photoUrl,
         payload.primaryArchiveDocumentId, payload.hasQrCode, payload.hasAtcud, payload.atcud,
         payload.imageQualityOk, payload.isMissingPages, payload.complianceNotes
       ]);
 
+      if (!invoice.rows[0]) {
+        const error = new Error('Fatura duplicada para este fornecedor');
+        error.statusCode = 409;
+        throw error;
+      }
+
       const invoiceId = invoice.rows[0].id;
+      let archiveDocument = null;
+      if (payload.archiveDocumentId) {
+        const archive = await client.query(`
+          update digital_archive_documents
+          set invoice_id = $1, supplier_id = coalesce($2, supplier_id)
+          where id = $3
+          returning *
+        `, [invoiceId, supplierId, payload.archiveDocumentId]);
+        archiveDocument = archive.rows[0] || null;
+        if (archiveDocument) {
+          await client.query(`
+            update purchase_invoices
+            set primary_archive_document_id = $1, photo_url = coalesce($2, photo_url)
+            where id = $3
+          `, [archiveDocument.id, archiveDocument.public_url, invoiceId]);
+        }
+      }
+
       const lines = [];
       for (const [index, line] of (payload.lines || []).entries()) {
         const lineResult = await client.query(`
@@ -72,6 +119,71 @@ invoicesRouter.post('/', async (req, res, next) => {
         ]);
         lines.push(lineResult.rows[0]);
 
+        const productBefore = await client.query('select * from products where id = $1 for update', [line.productId]);
+        const product = productBefore.rows[0];
+        if (product) {
+          const currentStock = Number(product.current_stock || 0);
+          const averagePrice = Number(product.average_price || 0);
+          const quantityStock = Number(line.quantityStock || 0);
+          const unitPrice = Number(line.unitPrice || 0);
+          const currentValue = currentStock * averagePrice;
+          const incomingValue = Number(line.quantityOriginal || 0) * unitPrice;
+          const totalStock = currentStock + quantityStock;
+          const newAveragePrice = totalStock > 0 ? (currentValue + incomingValue) / totalStock : unitPrice;
+
+          const productAfter = await client.query(`
+            update products
+            set current_stock = $1, average_price = $2
+            where id = $3
+            returning *
+          `, [totalStock, newAveragePrice, line.productId]);
+          await audit(client, req, 'update_stock', 'products', line.productId, product, productAfter.rows[0]);
+        }
+
+        if (line.originalName && line.productId) {
+          const alias = await client.query(`
+            insert into product_aliases (
+              supplier_id, product_id, supplier_item_name, supplier_item_code,
+              supplier_unit, product_unit, conversion_factor, confidence, last_seen_at
+            )
+            values ($1, $2, $3, $4, $5, $6, coalesce($7, 1), coalesce($8, 100), now())
+            on conflict (supplier_id, normalized_supplier_item_name, coalesce(supplier_item_code, '')) do update set
+              product_id = excluded.product_id,
+              supplier_unit = excluded.supplier_unit,
+              product_unit = excluded.product_unit,
+              conversion_factor = excluded.conversion_factor,
+              confidence = excluded.confidence,
+              last_seen_at = now()
+            returning *
+          `, [
+            supplierId,
+            line.productId,
+            line.originalName,
+            line.supplierItemCode || null,
+            line.unitOriginal,
+            line.unitStock,
+            line.conversionFactor || 1,
+            line.confidence || 100
+          ]);
+          await audit(client, req, 'learn_alias', 'product_aliases', alias.rows[0].id, null, alias.rows[0]);
+
+          if (line.unitOriginal && line.unitStock && line.unitOriginal !== line.unitStock) {
+            await client.query(`
+              insert into product_unit_conversions (product_id, supplier_id, from_unit, to_unit, factor, notes)
+              values ($1, $2, $3, $4, coalesce($5, 1), $6)
+              on conflict (product_id, coalesce(supplier_id, '00000000-0000-0000-0000-000000000000'::uuid), from_unit, to_unit)
+              do update set factor = excluded.factor, notes = excluded.notes
+            `, [
+              line.productId,
+              supplierId,
+              line.unitOriginal,
+              line.unitStock,
+              line.conversionFactor || 1,
+              `Aprendido via fatura ${payload.docNumber || ''}`
+            ]);
+          }
+        }
+
         await client.query(`
           insert into movements (product_id, invoice_line_id, type, quantity, price, supplier_id, supplier_name, notes)
           values ($1, $2, 'ENTRADA', $3, $4, $5, $6, $7)
@@ -80,13 +192,14 @@ invoicesRouter.post('/', async (req, res, next) => {
           lineResult.rows[0].id,
           line.quantityStock,
           line.unitPrice,
-          payload.supplierId,
+          supplierId,
           payload.supplierName,
           `Entrada via Fatura ${payload.docNumber || ''}`
         ]);
       }
 
-      return { invoice: invoice.rows[0], lines };
+      await audit(client, req, 'create', 'purchase_invoices', invoiceId, null, { ...invoice.rows[0], lines });
+      return { invoice: invoice.rows[0], lines, archiveDocument };
     });
     res.status(201).json(saved);
   } catch (error) {

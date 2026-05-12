@@ -24,9 +24,9 @@ import {
 interface ProductCatalogProps {
   products: Product[];
   categories: Category[];
-  onAddProduct: (product: any) => void;
-  onUpdateProduct: (id: string, data: Partial<Product>) => void;
-  onDeleteProduct: (id: string) => void;
+  onAddProduct: (product: any) => void | Promise<Product>;
+  onUpdateProduct: (id: string, data: Partial<Product>) => void | Promise<void>;
+  onDeleteProduct: (id: string) => void | Promise<void>;
   onAddCategory: (name: string) => void;
 }
 
@@ -71,12 +71,12 @@ const ProductCatalog: React.FC<ProductCatalogProps> = ({ products, categories, o
     setModalType('NONE');
   };
 
-  const handleProductSubmit = (e: React.FormEvent) => {
+  const handleProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (modalType === 'ADD_PRODUCT') {
-      onAddProduct(productForm);
+      await onAddProduct(productForm);
     } else if (modalType === 'EDIT_PRODUCT' && editingProduct) {
-      onUpdateProduct(editingProduct.id, productForm);
+      await onUpdateProduct(editingProduct.id, productForm);
     }
     resetForm();
   };

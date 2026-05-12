@@ -1,5 +1,5 @@
 import { InvoiceStatus, PurchaseInvoice, PurchaseInvoiceLine } from '../types';
-import { apiGet } from './apiClient';
+import { apiGet, apiPost } from './apiClient';
 import { PageOptions, PageResult } from './pagination';
 
 const invoiceFromDb = (row: any): PurchaseInvoice => ({
@@ -59,4 +59,13 @@ export async function listInvoicesPage(options?: PageOptions): Promise<PageResul
 export async function listInvoiceLines(invoiceId: string): Promise<PurchaseInvoiceLine[]> {
   const result = await apiGet<{ data: any[] }>(`/api/invoices/${invoiceId}/lines`);
   return result.data.map(lineFromDb);
+}
+
+export async function createInvoiceWithLines(payload: any): Promise<{ invoice: PurchaseInvoice; lines: PurchaseInvoiceLine[]; archiveDocument?: any }> {
+  const result = await apiPost<{ invoice: any; lines: any[]; archiveDocument?: any }>('/api/invoices', payload);
+  return {
+    invoice: invoiceFromDb(result.invoice),
+    lines: result.lines.map(lineFromDb),
+    archiveDocument: result.archiveDocument
+  };
 }

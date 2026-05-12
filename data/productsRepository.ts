@@ -1,5 +1,5 @@
 import { Product } from '../types';
-import { apiGet, apiPost } from './apiClient';
+import { apiDelete, apiGet, apiPost } from './apiClient';
 import { PageOptions, PageResult } from './pagination';
 
 const fromDb = (row: any): Product => ({
@@ -21,5 +21,10 @@ export async function listProductsPage(options?: PageOptions): Promise<PageResul
 }
 
 export async function upsertProduct(product: Product) {
-  await apiPost('/api/products', product);
+  const row = await apiPost<any>('/api/products', product);
+  return fromDb(row);
+}
+
+export async function deleteProduct(productId: string) {
+  await apiDelete(`/api/products/${productId}`);
 }

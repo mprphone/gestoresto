@@ -1,0 +1,25 @@
+[Unit]
+Description=GestoResto API
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/programas/gestoresto
+Environment=NODE_ENV=production
+Environment=PGDATABASE=gestoresto
+Environment=PGUSER=ubuntu
+Environment=PGHOST=/var/run/postgresql
+Environment=API_PORT=8790
+Environment=ARCHIVE_ROOT=/mnt/bunker/resto
+EnvironmentFile=-/home/ubuntu/programas/gestoresto/.env.local
+ExecStart=/usr/bin/npm run api
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

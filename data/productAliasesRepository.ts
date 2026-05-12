@@ -15,10 +15,11 @@ const fromDb = (row: any): ProductAlias => ({
   lastSeenAt: row.last_seen_at || undefined
 });
 
-export async function listAliasesForSupplier(supplierId: string, options?: PageOptions): Promise<PageResult<ProductAlias>> {
+export async function listAliasesForSupplier(supplierId?: string, options?: PageOptions): Promise<PageResult<ProductAlias>> {
   const page = options?.page || 1;
   const pageSize = options?.pageSize || 50;
-  const result = await apiGet<PageResult<any>>(`/api/aliases?supplierId=${supplierId}&page=${page}&pageSize=${pageSize}`);
+  const query = supplierId ? `supplierId=${supplierId}&` : '';
+  const result = await apiGet<PageResult<any>>(`/api/aliases?${query}page=${page}&pageSize=${pageSize}`);
   return { ...result, data: result.data.map(fromDb) };
 }
 

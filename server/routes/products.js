@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import { pageRange, pageResult } from '../pagination.js';
+import { audit } from '../audit.js';
 
 export const productsRouter = Router();
 
@@ -42,6 +43,20 @@ productsRouter.post('/', async (req, res, next) => {
       returning *
     `, [product.id, product.name, product.category, product.unit, product.currentStock, product.averagePrice, product.minStock]);
     res.status(201).json(result.rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+productsRouter.delete('/:id', async (req, res, next) => {
+  try {
+    const result = await withTransaction(async client => {
+      const before = await client.query('select * from products where id = $1', [req.params.id]);
+      const after = await client.query('update products set is_active = false where id = $1 returning *', [req.params.id]);
+      await audit(client, req, 'deactivate', 'products', req.params.id, before.rows[0] || null, after.rows[0] || null);
+      return after.rows[0];
+    });
+    res.json(result);
   } catch (error) {
     next(error);
   }

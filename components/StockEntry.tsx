@@ -11,7 +11,7 @@ interface StockEntryProps {
   productAliases: ProductAlias[];
   categories: Category[];
   onComplete: (items: StockEntryLineInput[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any) => void;
-  onQuickCreateProduct: (data: any) => Product;
+  onQuickCreateProduct: (data: any) => Product | Promise<Product>;
 }
 
 const normalizeText = (value: string) =>
@@ -214,7 +214,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                                         ) : (
                                           <div className="flex flex-col sm:flex-row gap-2">
                                              <select className="flex-1 px-4 py-3 bg-white border border-orange-200 rounded-xl text-[10px] font-black uppercase outline-none" onChange={(e) => setMapping(prev => ({ ...prev, [idx]: e.target.value }))}><option value="">Selecionar Artigo Existente...</option>{filteredProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-                                             <button onClick={() => setMapping(prev => ({ ...prev, [idx]: onQuickCreateProduct({ name: item.name, category: currentFamily }).id }))} className="px-4 py-3 bg-slate-900 text-white text-[10px] font-black uppercase rounded-xl hover:bg-orange-500 transition-all flex items-center gap-2"><PlusCircle size={14} /> Criar Novo</button>
+                                             <button onClick={async () => {
+                                               const created = await onQuickCreateProduct({ name: item.name, category: currentFamily, unit: unitOriginals[idx] || item.unit || 'un' });
+                                               setMapping(prev => ({ ...prev, [idx]: created.id }));
+                                             }} className="px-4 py-3 bg-slate-900 text-white text-[10px] font-black uppercase rounded-xl hover:bg-orange-500 transition-all flex items-center gap-2"><PlusCircle size={14} /> Criar Novo</button>
                                           </div>
                                         )}
                                      </div>
