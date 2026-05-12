@@ -60,6 +60,26 @@ VITE_API_URL=
 
 Em desenvolvimento, o Vite encaminha `/api` para `http://localhost:8790`.
 
+## Vercel
+
+O Vercel hospeda apenas o frontend. A API e o PostgreSQL ficam no servidor.
+
+Para o site `gestoresto.vercel.app` funcionar, a API do servidor tem de estar publicada por HTTPS e o projeto Vercel precisa desta variável:
+
+```bash
+VITE_API_URL=https://api.seudominio.pt
+```
+
+Depois de alterar a variável no Vercel, faça novo deploy.
+
+Sem `VITE_API_URL`, o frontend tenta chamar `/api` dentro do Vercel e recebe `NOT_FOUND`.
+
+Exemplo de reverse proxy Nginx:
+
+```bash
+deploy/nginx/gestoresto-api.conf
+```
+
 ## Funcionalidades estruturais
 
 - `database/schema.sql`: schema PostgreSQL local.
