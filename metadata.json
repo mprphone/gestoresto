@@ -1,0 +1,7 @@
+{
+  "name": "GestoRestô - Inventário Inteligente",
+  "description": "Sistema avançado de gestão de stock para restaurantes com leitura de faturas por IA, controle de preço médio, alertas de validade e guias de reposição.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
