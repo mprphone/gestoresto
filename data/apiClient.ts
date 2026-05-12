@@ -1,11 +1,11 @@
-const API_BASE = (((import.meta as any).env.VITE_API_URL as string | undefined) || '').replace(/\/$/, '');
+const DEFAULT_PRODUCTION_API_URL = 'https://gestoresto.mpr.pt';
+const API_BASE = (
+  ((import.meta as any).env.VITE_API_URL as string | undefined) ||
+  (((import.meta as any).env.PROD as boolean) ? DEFAULT_PRODUCTION_API_URL : '')
+).replace(/\/$/, '');
 
 function apiNotConfiguredMessage() {
-  return [
-    'API do servidor não configurada.',
-    'No Vercel, defina VITE_API_URL com o endereço HTTPS da API do servidor',
-    '(ex: https://api.seudominio.pt) e faça novo deploy.'
-  ].join(' ');
+  return `API do servidor não configurada. Use ${DEFAULT_PRODUCTION_API_URL} ou defina VITE_API_URL e faça novo deploy.`;
 }
 
 function shouldFailFast() {
