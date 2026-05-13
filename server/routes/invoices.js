@@ -5,6 +5,61 @@ import { audit } from '../audit.js';
 
 export const invoicesRouter = Router();
 
+function onlyDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+async function validateRestaurantCustomer(client, payload) {
+  const profileResult = await client.query(`
+    select *
+    from restaurant_profile
+    where is_active = true
+    order by updated_at desc
+    limit 1
+  `);
+  const profile = profileResult.rows[0] || null;
+  const customerNif = onlyDigits(payload.customerNif);
+
+  if (!profile) {
+    return {
+      profileId: null,
+      customerNif: customerNif || null,
+      customerName: payload.customerName || null,
+      status: 'NAO_VERIFICADO',
+      notes: 'Sem perfil do restaurante configurado.'
+    };
+  }
+
+  const expectedNif = onlyDigits(profile.nif);
+  if (!customerNif) {
+    return {
+      profileId: profile.id,
+      customerNif: null,
+      customerName: payload.customerName || null,
+      status: 'ALERTA',
+      notes: `A fatura não tem NIF de cliente legível. NIF esperado: ${expectedNif}.`
+    };
+  }
+
+  if (customerNif !== expectedNif) {
+    return {
+      profileId: profile.id,
+      customerNif,
+      customerName: payload.customerName || null,
+      status: 'ALERTA',
+      notes: `NIF do cliente (${customerNif}) não corresponde ao NIF do restaurante (${expectedNif}).`
+    };
+  }
+
+  return {
+    profileId: profile.id,
+    customerNif,
+    customerName: payload.customerName || profile.name,
+    status: 'VALIDO',
+    notes: null
+  };
+}
+
 invoicesRouter.get('/', async (req, res, next) => {
   try {
     const { page, pageSize, limit, offset } = pageRange(req);
@@ -39,6 +94,7 @@ invoicesRouter.post('/', async (req, res, next) => {
   try {
     const payload = req.body;
     const saved = await withTransaction(async client => {
+      const restaurantValidation = await validateRestaurantCustomer(client, payload);
       let supplierId = payload.supplierId || null;
       if (!supplierId && payload.supplierNif) {
         const supplier = await client.query(`
@@ -62,16 +118,25 @@ invoicesRouter.post('/', async (req, res, next) => {
 
       const invoice = await client.query(`
         insert into purchase_invoices (
-          supplier_id, supplier_name, supplier_nif, doc_number, total_amount,
+          supplier_id, supplier_name, supplier_nif,
+          customer_name, customer_nif, restaurant_profile_id, restaurant_match_status, restaurant_match_notes,
+          doc_number, total_amount,
           date_issued, due_date, status, paid_amount, photo_url,
           primary_archive_document_id, has_qr_code, has_atcud, atcud,
           image_quality_ok, is_missing_pages, compliance_notes
         )
-        values ($1, $2, $3, $4, $5, coalesce($6, current_date), $7, coalesce($8, 'PENDENTE'), coalesce($9, 0), $10, $11, $12, $13, $14, $15, $16, $17)
+        values (
+          $1, $2, $3, $4, $5, $6, $7, $8,
+          $9, $10, coalesce($11, current_date), $12, coalesce($13, 'PENDENTE'), coalesce($14, 0), $15,
+          $16, $17, $18, $19, $20, $21, $22
+        )
         on conflict (supplier_nif, doc_number) do nothing
         returning *
       `, [
-        supplierId, payload.supplierName, payload.supplierNif, payload.docNumber, payload.totalAmount,
+        supplierId, payload.supplierName, payload.supplierNif,
+        restaurantValidation.customerName, restaurantValidation.customerNif, restaurantValidation.profileId,
+        restaurantValidation.status, restaurantValidation.notes,
+        payload.docNumber, payload.totalAmount,
         payload.dateIssued, payload.dueDate, payload.status, payload.paidAmount, payload.photoUrl,
         payload.primaryArchiveDocumentId, payload.hasQrCode, payload.hasAtcud, payload.atcud,
         payload.imageQualityOk, payload.isMissingPages, payload.complianceNotes

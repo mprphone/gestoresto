@@ -22,3 +22,6 @@ Tabelas centrais:
 - `movements`
 - `app_users`
 - `audit_log`
+- `restaurant_profile`
+
+`restaurant_profile` guarda localmente o nome/NIF do restaurante. Ao registar uma fatura, a API compara o NIF do cliente/comprador extraído da imagem com o NIF ativo nesta tabela e grava `restaurant_match_status` em `purchase_invoices`.

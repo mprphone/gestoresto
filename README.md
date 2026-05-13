@@ -56,6 +56,18 @@ PGHOST=/var/run/postgresql
 ARCHIVE_ROOT=/mnt/bunker/resto
 API_PORT=8790
 VITE_API_URL=
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=
+IMAP_HOST=
+IMAP_PORT=993
+IMAP_SECURE=true
+IMAP_USER=
+IMAP_PASS=
+IMAP_MAILBOX=INBOX
 ```
 
 Em desenvolvimento, o Vite encaminha `/api` para `http://localhost:8790`.
@@ -99,6 +111,7 @@ deploy/nginx/gestoresto-api.conf
 - `digital_archive_documents`: metadados do arquivo digital.
 - `app_users`: autenticacao simples.
 - `audit_log`: auditoria de alteracoes criticas.
+- `restaurant_profile`: dados locais do restaurante usados para validar se o NIF do cliente na fatura corresponde ao restaurante.
 
 ## Backup
 
@@ -131,7 +144,7 @@ Remover serviço:
 
 ## Email
 
-Para envio real de relatórios por email, configure:
+Para envio real de relatórios por email, configure SMTP:
 
 ```bash
 SMTP_HOST=
@@ -143,3 +156,14 @@ SMTP_FROM=
 ```
 
 Se SMTP não estiver configurado, o sistema regista o email como `SIMULADO`, para testar o fluxo sem perder histórico.
+
+IMAP serve para ler/receber emails de uma caixa. O envio continua a usar SMTP:
+
+```bash
+IMAP_HOST=
+IMAP_PORT=993
+IMAP_SECURE=true
+IMAP_USER=
+IMAP_PASS=
+IMAP_MAILBOX=INBOX
+```

@@ -13,6 +13,7 @@ import { movementsRouter } from './routes/movements.js';
 import { paymentsRouter } from './routes/payments.js';
 import { reportsRouter } from './routes/reports.js';
 import { emailsRouter } from './routes/emails.js';
+import { restaurantProfileRouter } from './routes/restaurantProfile.js';
 
 const app = express();
 
@@ -67,6 +68,7 @@ app.use('/api/archive', archiveRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/emails', emailsRouter);
+app.use('/api/restaurant-profile', restaurantProfileRouter);
 
 app.use((error, _req, res, _next) => {
   console.error(error);

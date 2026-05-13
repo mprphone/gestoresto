@@ -17,5 +17,13 @@ export const config = {
     user: process.env.SMTP_USER || '',
     pass: process.env.SMTP_PASS || '',
     from: process.env.SMTP_FROM || process.env.SMTP_USER || ''
+  },
+  imap: {
+    host: process.env.IMAP_HOST || '',
+    port: Number(process.env.IMAP_PORT || 993),
+    secure: process.env.IMAP_SECURE !== 'false',
+    user: process.env.IMAP_USER || '',
+    pass: process.env.IMAP_PASS || '',
+    mailbox: process.env.IMAP_MAILBOX || 'INBOX'
   }
 };

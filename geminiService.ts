@@ -4,6 +4,8 @@ import { GoogleGenAI, Type } from "@google/genai";
 export interface InvoiceExtractedData {
   supplierName?: string;
   supplierNif?: string;
+  customerName?: string;
+  customerNif?: string;
   supplierEmail?: string;
   supplierPhone?: string;
   invoiceNumber?: string;
@@ -43,7 +45,7 @@ export const processInvoiceImage = async (base64Images: string[]): Promise<Invoi
         parts: [
           ...imageParts,
           { text: `Analise estas imagens de faturas para um restaurante. 
-          Extraia: Fornecedor, NIF, Nº Fatura, Itens (nome, código de artigo se existir, qtd, unidade, preço un., total, IVA, categoria/família sugerida).
+          Extraia: Fornecedor, NIF do fornecedor, Cliente/Comprador, NIF do cliente/comprador, Nº Fatura, Itens (nome, código de artigo se existir, qtd, unidade, preço un., total, IVA, categoria/família sugerida).
           
           VALIDAÇÃO TÉCNICA/LEGAL:
           1. Avalie a qualidade da imagem: Está nítida e legível para arquivo digital legal (imageQualityOk)?
@@ -60,6 +62,8 @@ export const processInvoiceImage = async (base64Images: string[]): Promise<Invoi
           properties: {
             supplierName: { type: Type.STRING },
             supplierNif: { type: Type.STRING },
+            customerName: { type: Type.STRING },
+            customerNif: { type: Type.STRING },
             supplierEmail: { type: Type.STRING },
             supplierPhone: { type: Type.STRING },
             invoiceNumber: { type: Type.STRING },

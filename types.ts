@@ -33,11 +33,29 @@ export interface Supplier {
   notes?: string;
 }
 
+export interface RestaurantProfile {
+  id?: string;
+  name: string;
+  nif: string;
+  legalName?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  postalCode?: string;
+  city?: string;
+  country?: string;
+}
+
 export interface PurchaseInvoice {
   id: string;
   supplierId: string;
   supplierName: string;
   supplierNif: string;
+  customerName?: string;
+  customerNif?: string;
+  restaurantProfileId?: string;
+  restaurantMatchStatus?: 'VALIDO' | 'ALERTA' | 'NAO_VERIFICADO';
+  restaurantMatchNotes?: string;
   docNumber: string;
   totalAmount: number;
   date: string;

@@ -155,6 +155,30 @@ create index if not exists email_messages_status_date_idx on email_messages (sta
 create index if not exists email_messages_recipient_date_idx on email_messages (recipient, created_at desc);
 create index if not exists email_messages_related_idx on email_messages (related_entity_table, related_entity_id);
 
+create table if not exists restaurant_profile (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  nif text not null,
+  legal_name text,
+  email text,
+  phone text,
+  address text,
+  postal_code text,
+  city text,
+  country text not null default 'Portugal',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists restaurant_profile_active_unique
+  on restaurant_profile (is_active)
+  where is_active;
+
+drop trigger if exists restaurant_profile_touch_updated_at on restaurant_profile;
+create trigger restaurant_profile_touch_updated_at
+before update on restaurant_profile
+for each row execute function touch_updated_at();
+
 -- Conversões genéricas entre unidades. Ex: cx -> un com fator 6.
 create table if not exists unit_conversions (
   id uuid primary key default gen_random_uuid(),
@@ -220,6 +244,12 @@ create table if not exists purchase_invoices (
   supplier_id uuid references suppliers(id) on delete set null,
   supplier_name text not null,
   supplier_nif text not null,
+  customer_name text,
+  customer_nif text,
+  restaurant_profile_id uuid references restaurant_profile(id) on delete set null,
+  restaurant_match_status text not null default 'NAO_VERIFICADO'
+    check (restaurant_match_status in ('VALIDO','ALERTA','NAO_VERIFICADO')),
+  restaurant_match_notes text,
   doc_number text not null,
   total_amount numeric(14,2) not null check (total_amount >= 0),
   date_issued date not null,
@@ -245,6 +275,19 @@ create index if not exists invoices_supplier_date_idx on purchase_invoices (supp
 create index if not exists invoices_status_due_idx on purchase_invoices (status, due_date, id desc);
 create index if not exists invoices_date_pagination_idx on purchase_invoices (date_issued desc, id desc);
 create unique index if not exists invoices_unique_supplier_doc on purchase_invoices (supplier_nif, doc_number);
+
+alter table purchase_invoices
+  add column if not exists customer_name text,
+  add column if not exists customer_nif text,
+  add column if not exists restaurant_profile_id uuid references restaurant_profile(id) on delete set null,
+  add column if not exists restaurant_match_status text not null default 'NAO_VERIFICADO',
+  add column if not exists restaurant_match_notes text;
+
+alter table purchase_invoices
+  drop constraint if exists purchase_invoices_restaurant_match_status_check;
+alter table purchase_invoices
+  add constraint purchase_invoices_restaurant_match_status_check
+  check (restaurant_match_status in ('VALIDO','ALERTA','NAO_VERIFICADO'));
 
 drop trigger if exists purchase_invoices_touch_updated_at on purchase_invoices;
 create trigger purchase_invoices_touch_updated_at

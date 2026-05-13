@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, Upload, Check, Loader2, X, QrCode, FileWarning, PlusCircle, RefreshCcw, Layers, AlertCircle, Copy, Image as ImageIcon, ChevronRight, Edit3 } from 'lucide-react';
+import { Camera, Upload, Check, X, PlusCircle, RefreshCcw, Copy } from 'lucide-react';
 import { processInvoiceImage, InvoiceExtractedData } from '../geminiService';
 import { Product, Category, Supplier, PurchaseInvoice, ProductAlias, StockEntryLineInput } from '../types';
 
@@ -35,9 +35,12 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [nif, setNif] = useState('');
   const [docNumber, setDocNumber] = useState('');
   const [isDuplicate, setIsDuplicate] = useState(false);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     if (nif && docNumber) {
@@ -45,6 +48,53 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       setIsDuplicate(exists);
     }
   }, [nif, docNumber, invoices]);
+
+  useEffect(() => {
+    return () => stopCamera();
+  }, []);
+
+  const stopCamera = () => {
+    cameraStreamRef.current?.getTracks().forEach(track => track.stop());
+    cameraStreamRef.current = null;
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  };
+
+  const openCamera = async () => {
+    setCameraError(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('Este browser não dá acesso direto à câmara. Use Abrir Ficheiro ou atualize o browser.');
+      return;
+    }
+
+    try {
+      stopCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        audio: false
+      });
+      cameraStreamRef.current = stream;
+      setIsCameraOpen(true);
+      requestAnimationFrame(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => undefined);
+        }
+      });
+    } catch (error) {
+      setCameraError('Não consegui abrir a câmara. Confirme as permissões do browser e se está em HTTPS ou localhost.');
+    }
+  };
+
+  const closeCamera = () => {
+    stopCamera();
+    setIsCameraOpen(false);
+  };
 
   const compressImage = (base64: string): Promise<string> => {
     return new Promise((resolve) => {
@@ -125,6 +175,29 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     await processAllPages(updated);
   };
 
+  const captureCameraPage = async () => {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2) {
+      setCameraError('A câmara ainda não está pronta. Espere um segundo e tente novamente.');
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    const sourceWidth = video.videoWidth || 1280;
+    const sourceHeight = video.videoHeight || 720;
+    const maxWidth = 1400;
+    const scale = Math.min(1, maxWidth / sourceWidth);
+    canvas.width = Math.round(sourceWidth * scale);
+    canvas.height = Math.round(sourceHeight * scale);
+    const ctx = canvas.getContext('2d');
+    ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const captured = canvas.toDataURL('image/jpeg', 0.86).split(',')[1];
+    const updated = [...pages, captured];
+    setPages(updated);
+    closeCamera();
+    await processAllPages(updated);
+  };
+
   const confirmEntry = () => {
     if (extractedData && !isDuplicate) {
       const itemsToSubmit: StockEntryLineInput[] = extractedData.items.map((item, idx) => {
@@ -143,14 +216,19 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           vatRate: item.vatRate
         };
       });
-      onComplete(itemsToSubmit, `data:image/jpeg;base64,${pages[0]}`, { name: supplier, nif }, { docNumber, totalAmount: extractedData.totalInvoiceAmount, digitalCompliance: extractedData.digitalCompliance });
+      onComplete(itemsToSubmit, `data:image/jpeg;base64,${pages[0]}`, { name: supplier, nif }, {
+        docNumber,
+        totalAmount: extractedData.totalInvoiceAmount,
+        customerName: extractedData.customerName,
+        customerNif: extractedData.customerNif,
+        digitalCompliance: extractedData.digitalCompliance
+      });
     }
   };
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-20">
       <input type="file" accept="image/*" multiple className="hidden" ref={fileInputRef} onChange={(e) => handleFiles(e.target.files)} />
-      <input type="file" accept="image/*" capture="environment" className="hidden" ref={cameraInputRef} onChange={(e) => handleFiles(e.target.files)} />
 
       {!extractedData && !isProcessing && pages.length === 0 && (
         <div className="bg-white p-12 rounded-[3rem] shadow-sm border border-slate-200 text-center animate-in fade-in zoom-in-95">
@@ -158,9 +236,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           <h3 className="text-3xl font-black mb-4 uppercase italic tracking-tight">Nova Fatura p/ Stock</h3>
           <p className="text-slate-500 max-w-md mx-auto mb-10 font-medium">Capture o documento para entrada automática no armazém central.</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-xl mx-auto">
-             <button onClick={() => cameraInputRef.current?.click()} className="bg-slate-900 text-white p-8 rounded-[2.5rem] font-black uppercase flex flex-col items-center gap-4 hover:bg-orange-500 transition-all shadow-2xl active:scale-95"><Camera size={32} /> Usar Câmara</button>
+             <button onClick={openCamera} className="bg-slate-900 text-white p-8 rounded-[2.5rem] font-black uppercase flex flex-col items-center gap-4 hover:bg-orange-500 transition-all shadow-2xl active:scale-95"><Camera size={32} /> Usar Câmara</button>
              <button onClick={() => fileInputRef.current?.click()} className="bg-white text-slate-900 p-8 rounded-[2.5rem] font-black uppercase flex flex-col items-center gap-4 border-2 border-slate-100 hover:border-orange-500 transition-all shadow-xl active:scale-95"><Upload size={32} /> Abrir Ficheiro</button>
           </div>
+          {cameraError && <p className="mt-6 text-xs font-bold text-red-500">{cameraError}</p>}
         </div>
       )}
 
@@ -176,8 +255,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                         <button onClick={() => setPages(prev => prev.filter((_, i) => i !== idx))} className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"><X size={14} /></button>
                      </div>
                    ))}
-                   <button onClick={() => cameraInputRef.current?.click()} className="aspect-[3/4] rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-300 hover:border-orange-500 transition-all"><PlusCircle size={24} /><span className="text-[8px] font-black uppercase mt-1">Add Pág.</span></button>
+                   <button onClick={openCamera} className="aspect-[3/4] rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-300 hover:border-orange-500 transition-all"><PlusCircle size={24} /><span className="text-[8px] font-black uppercase mt-1">Add Pág.</span></button>
                 </div>
+                {cameraError && <p className="mb-4 text-xs font-bold text-red-500">{cameraError}</p>}
                 {isProcessing && <div className="flex items-center gap-3 p-4 bg-orange-50 rounded-2xl border border-orange-100 animate-pulse"><RefreshCcw className="animate-spin text-orange-500" size={20} /><p className="text-[10px] font-black text-orange-600 uppercase">Lendo Artigos...</p></div>}
              </div>
              {extractedData && isDuplicate && <div className="bg-red-600 text-white p-6 rounded-[2.5rem] shadow-xl animate-bounce flex items-start gap-4"><Copy size={32} /><div><h5 className="font-black uppercase text-sm">Fatura Duplicada!</h5><p className="text-[10px] font-bold opacity-80 mt-1">Este Nº {docNumber} já foi inserido anteriormente.</p></div></div>}
@@ -249,6 +329,32 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                  </div>
                </div>
              ) : <div className="h-full flex flex-col items-center justify-center text-slate-300 py-32 space-y-6"><RefreshCcw className={`animate-spin ${isProcessing ? 'text-orange-500' : 'opacity-0'}`} size={48} /><p className="font-black text-[10px] uppercase">IA Analisando Documento...</p></div>}
+          </div>
+        </div>
+      )}
+
+      {isCameraOpen && (
+        <div className="fixed inset-0 z-[120] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-5xl bg-slate-900 border border-white/10 rounded-[2rem] overflow-hidden shadow-2xl">
+            <div className="p-4 flex items-center justify-between text-white">
+              <div>
+                <h4 className="font-black uppercase text-sm">Câmara</h4>
+                <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Enquadre a fatura e fotografe</p>
+              </div>
+              <button onClick={closeCamera} className="p-3 bg-white/10 hover:bg-white/20 rounded-full transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="bg-black aspect-[4/3] md:aspect-video">
+              <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-contain" />
+            </div>
+            {cameraError && <p className="px-6 pt-4 text-xs font-bold text-red-300">{cameraError}</p>}
+            <div className="p-5 flex flex-col sm:flex-row gap-3 justify-end bg-slate-900">
+              <button onClick={closeCamera} className="px-6 py-4 rounded-2xl border border-white/10 text-white/60 font-black uppercase text-xs hover:text-white hover:bg-white/10 transition-all">Cancelar</button>
+              <button onClick={captureCameraPage} className="px-8 py-4 rounded-2xl bg-orange-500 text-white font-black uppercase text-xs hover:bg-orange-600 transition-all flex items-center justify-center gap-2">
+                <Camera size={18} /> Fotografar
+              </button>
+            </div>
           </div>
         </div>
       )}

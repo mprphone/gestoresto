@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { ArchiveDocumentType, Category, Product, Movement, MovementType, Supplier, PurchaseInvoice, InvoiceStatus, DefaultCategories, Payment, ProductAlias, PurchaseInvoiceLine, DigitalArchiveDocument, StockEntryLineInput } from './types';
+import { ArchiveDocumentType, Category, Product, Movement, MovementType, Supplier, PurchaseInvoice, InvoiceStatus, DefaultCategories, Payment, ProductAlias, PurchaseInvoiceLine, DigitalArchiveDocument, StockEntryLineInput, RestaurantProfile } from './types';
 import { listProductsPage, upsertProduct, deleteProduct } from './data/productsRepository';
 import { listSuppliersPage } from './data/suppliersRepository';
 import { listInvoicesPage, listInvoiceLines, createInvoiceWithLines } from './data/invoicesRepository';
@@ -8,6 +8,7 @@ import { listAliasesForSupplier } from './data/productAliasesRepository';
 import { listArchiveDocumentsForInvoice, uploadArchiveDocument } from './data/archiveRepository';
 import { listMovementsPage, createMovement } from './data/movementsRepository';
 import { createBatchPayment, listPayments } from './data/paymentsRepository';
+import { getRestaurantProfile, saveRestaurantProfile } from './data/restaurantProfileRepository';
 import Dashboard from './components/Dashboard';
 import InventoryList from './components/InventoryList';
 import StockEntry from './components/StockEntry';
@@ -19,6 +20,7 @@ import SupplierManagement from './components/SupplierManagement';
 import PurchasesList from './components/PurchasesList';
 import EquivalencesManagement from './components/EquivalencesManagement';
 import SystemNotice from './components/SystemNotice';
+import RestaurantSettings from './components/RestaurantSettings';
 import { 
   LayoutDashboard, 
   Package, 
@@ -28,8 +30,9 @@ import {
   UtensilsCrossed,
   BookOpen,
   Building2,
-  Wallet
-  ,Link2
+  Wallet,
+  Link2,
+  Store
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -42,7 +45,8 @@ const App: React.FC = () => {
   const [movements, setMovements] = useState<Movement[]>([]);
   const [productAliases, setProductAliases] = useState<ProductAlias[]>([]);
   const [archiveDocuments, setArchiveDocuments] = useState<DigitalArchiveDocument[]>([]);
-  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv'>('dash');
+  const [restaurantProfile, setRestaurantProfile] = useState<RestaurantProfile | null>(null);
+  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'restaurant'>('dash');
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
@@ -58,13 +62,14 @@ const App: React.FC = () => {
 
   const refreshData = async () => {
     setLoadError(null);
-    const [productsPage, suppliersPage, invoicesPage, aliasesPage, movementsPage, paymentRows] = await Promise.all([
+    const [productsPage, suppliersPage, invoicesPage, aliasesPage, movementsPage, paymentRows, profile] = await Promise.all([
       listProductsPage({ pageSize: 500 }),
       listSuppliersPage({ pageSize: 500 }),
       listInvoicesPage({ pageSize: 500 }),
       listAliasesForSupplier(undefined, { pageSize: 1000 }),
       listMovementsPage({ pageSize: 500 }),
-      listPayments()
+      listPayments(),
+      getRestaurantProfile()
     ]);
 
     setProducts(productsPage.data);
@@ -73,6 +78,7 @@ const App: React.FC = () => {
     setProductAliases(aliasesPage.data);
     setMovements(movementsPage.data);
     setPayments(paymentRows);
+    setRestaurantProfile(profile);
     setCategories(Array.from(new Set([...DefaultCategories, ...productsPage.data.map(p => p.category)])));
 
     const lineGroups = await Promise.all(invoicesPage.data.slice(0, 100).map(inv => listInvoiceLines(inv.id)));
@@ -181,6 +187,8 @@ const App: React.FC = () => {
       supplierNif: supplierData?.nif || '',
       supplierEmail: supplierData?.email,
       supplierPhone: supplierData?.phone,
+      customerName: invoiceData?.customerName,
+      customerNif: invoiceData?.customerNif,
       docNumber: invoiceData?.docNumber || 'S/N',
       totalAmount: invoiceData?.totalAmount || 0,
       dateIssued: new Date().toISOString().split('T')[0],
@@ -198,6 +206,14 @@ const App: React.FC = () => {
       await refreshData();
       setActiveTab('inv');
     }, 'Fatura guardada com arquivo, linhas e stock atualizados.');
+  };
+
+  const handleSaveRestaurantProfile = async (profile: RestaurantProfile) => {
+    await runAction(async () => {
+      const saved = await saveRestaurantProfile(profile);
+      setRestaurantProfile(saved);
+      await refreshData();
+    }, 'Dados do restaurante guardados.');
   };
 
   const handleStockMovement = async (productId: string, qty: number, type: MovementType, photoUrl?: string) => {
@@ -261,6 +277,7 @@ const App: React.FC = () => {
           <NavItem icon={<PlusCircle />} label="Nova Fatura" active={activeTab === 'entry'} onClick={() => setActiveTab('entry')} />
           <NavItem icon={<Wallet />} label="Pagamentos" active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} />
           <NavItem icon={<Building2 />} label="Fornecedores" active={activeTab === 'suppliers'} onClick={() => setActiveTab('suppliers')} />
+          <NavItem icon={<Store />} label="Restaurante" active={activeTab === 'restaurant'} onClick={() => setActiveTab('restaurant')} />
           <NavItem icon={<BookOpen />} label="Catálogo" active={activeTab === 'catalog'} onClick={() => setActiveTab('catalog')} />
           <NavItem icon={<Link2 />} label="Equivalências" active={activeTab === 'equiv'} onClick={() => setActiveTab('equiv')} />
           <NavItem icon={<BarChart3 />} label="Análises" active={activeTab === 'rep'} onClick={() => setActiveTab('rep')} />
@@ -272,7 +289,7 @@ const App: React.FC = () => {
           <h2 className="text-2xl font-black text-slate-800 tracking-tight uppercase">
             {activeTab === 'entry' ? "Entrada IA no Stock" : activeTab.toUpperCase()}
           </h2>
-          <AlertsPanel products={products} batches={[]} />
+          <AlertsPanel products={products} batches={[]} invoices={invoices} restaurantProfile={restaurantProfile} />
         </header>
 
         <div className="p-6 md:p-10 flex-1 pb-32">
@@ -284,6 +301,7 @@ const App: React.FC = () => {
           {activeTab === 'move' && <StockMovement products={products} movements={movements} onTransfer={handleStockMovement} categories={categories} />}
           {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} productAliases={productAliases} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} />}
           {activeTab === 'suppliers' && <SupplierManagement suppliers={suppliers} />}
+          {activeTab === 'restaurant' && <RestaurantSettings profile={restaurantProfile} onSave={handleSaveRestaurantProfile} />}
           {activeTab === 'finance' && <PurchasesList invoices={invoices} invoiceLines={invoiceLines} products={products} archiveDocuments={archiveDocuments} payments={payments} onMarkAsPaid={handleMarkAsPaid} />}
           {activeTab === 'catalog' && (
             <ProductCatalog 

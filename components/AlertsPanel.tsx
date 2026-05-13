@@ -1,14 +1,16 @@
 
 import React, { useState } from 'react';
-import { Product, Batch } from '../types';
-import { Bell, AlertTriangle, Clock, X } from 'lucide-react';
+import { Product, Batch, PurchaseInvoice, RestaurantProfile } from '../types';
+import { Bell, AlertTriangle, Clock, X, Store } from 'lucide-react';
 
 interface AlertsPanelProps {
   products: Product[];
   batches: Batch[];
+  invoices?: PurchaseInvoice[];
+  restaurantProfile?: RestaurantProfile | null;
 }
 
-const AlertsPanel: React.FC<AlertsPanelProps> = ({ products, batches }) => {
+const AlertsPanel: React.FC<AlertsPanelProps> = ({ products, batches, invoices = [], restaurantProfile }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   const lowStock = products.filter(p => p.currentStock <= p.minStock);
@@ -19,7 +21,9 @@ const AlertsPanel: React.FC<AlertsPanelProps> = ({ products, batches }) => {
     return diff > 0 && diff < (7 * 24 * 60 * 60 * 1000); // 7 days
   });
 
-  const totalAlerts = lowStock.length + expiringSoon.length;
+  const restaurantInvoiceAlerts = invoices.filter(inv => inv.restaurantMatchStatus === 'ALERTA');
+  const missingProfileAlert = restaurantProfile ? [] : ['missing-profile'];
+  const totalAlerts = lowStock.length + expiringSoon.length + restaurantInvoiceAlerts.length + missingProfileAlert.length;
 
   return (
     <div className="relative">
@@ -38,7 +42,7 @@ const AlertsPanel: React.FC<AlertsPanelProps> = ({ products, batches }) => {
       {isOpen && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setIsOpen(false)}></div>
-          <div className="absolute right-0 mt-3 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 z-30 overflow-hidden">
+          <div className="absolute right-0 mt-3 w-[calc(100vw-2rem)] max-w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 z-30 overflow-hidden">
             <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
               <h4 className="font-bold text-slate-900">Notificações de Gerência</h4>
               <button onClick={() => setIsOpen(false)} className="text-slate-400 hover:text-slate-600">
@@ -56,6 +60,30 @@ const AlertsPanel: React.FC<AlertsPanelProps> = ({ products, batches }) => {
                       <div>
                         <p className="text-sm font-bold text-slate-900">{p.name}</p>
                         <p className="text-xs text-slate-500">Apenas {p.currentStock} {p.unit} disponíveis.</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {(missingProfileAlert.length > 0 || restaurantInvoiceAlerts.length > 0) && (
+                <div className="p-2 border-t border-slate-100">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 mb-1">Restaurante / Faturas</p>
+                  {missingProfileAlert.length > 0 && (
+                    <div className="p-3 hover:bg-red-50 rounded-xl transition-colors flex gap-3">
+                      <div className="mt-1"><Store className="text-red-500" size={16} /></div>
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">Dados do restaurante em falta</p>
+                        <p className="text-xs text-slate-500">Configure o NIF do restaurante para validar faturas.</p>
+                      </div>
+                    </div>
+                  )}
+                  {restaurantInvoiceAlerts.map(inv => (
+                    <div key={inv.id} className="p-3 hover:bg-red-50 rounded-xl transition-colors flex gap-3">
+                      <div className="mt-1"><AlertTriangle className="text-red-500" size={16} /></div>
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">Fatura {inv.docNumber}</p>
+                        <p className="text-xs text-slate-500">{inv.restaurantMatchNotes || 'NIF do cliente não corresponde ao restaurante.'}</p>
                       </div>
                     </div>
                   ))}
