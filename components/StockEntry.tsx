@@ -112,7 +112,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           if (codes.length > 0 && codes[0].rawValue) {
             if (!active) return;
             setQrLiveDetected(true);
-            setTimeout(() => { if (active) captureCameraPageRef.current?.(); }, 500);
+            // Note: don't check `active` here — the effect cleanup sets active=false
+            // on re-render triggered by setQrLiveDetected, but capture must still fire
+            setTimeout(() => { captureCameraPageRef.current?.(); }, 500);
             return;
           }
         } catch { /* BarcodeDetector may throw on some frames */ }
