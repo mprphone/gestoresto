@@ -55,7 +55,7 @@ export const processInvoiceImage = async (base64Images: string[]): Promise<Invoi
           2. Detete QR Code e ATCUD (obrigatórios em Portugal).
           2.1. Se conseguir ler o conteúdo do QR Code, devolva qrCodeText e o valor total bruto do campo O do QR Code em qrTotalAmount. Nas faturas portuguesas, o campo O corresponde ao GrossTotal/Total amount.
           3. Verifique se faltam páginas (ex: referências a 'pág 1/2' sem a pág 2).
-          4. Some os totais das linhas e devolva calculatedLinesTotal.
+          4. Some os totais das linhas e devolva calculatedLinesTotal. Se as linhas vierem sem IVA, esta soma deve ser o subtotal/base tributável, não o total bruto.
           
           Retorne em JSON estrito.` }
         ]

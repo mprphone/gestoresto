@@ -69,7 +69,6 @@ function toCents(value) {
 
 function validateInvoiceTotals(payload) {
   const invoiceTotalCents = toCents(payload.totalAmount);
-  const linesTotalCents = toCents(payload.calculatedLinesTotal);
   const qrTotalCents = toCents(payload.qrTotalAmount);
   const notes = [];
 
@@ -77,16 +76,12 @@ function validateInvoiceTotals(payload) {
     return { status: 'ALERTA', notes: 'Total da fatura inválido ou ausente.' };
   }
 
-  if (linesTotalCents !== null && linesTotalCents !== invoiceTotalCents) {
-    notes.push(`Total das linhas (${(linesTotalCents / 100).toFixed(2)}) não corresponde ao total da fatura (${(invoiceTotalCents / 100).toFixed(2)}).`);
-  }
-
   if (qrTotalCents !== null && qrTotalCents !== invoiceTotalCents) {
     notes.push(`Total do QR (${(qrTotalCents / 100).toFixed(2)}) não corresponde ao total da fatura (${(invoiceTotalCents / 100).toFixed(2)}).`);
   }
 
   return {
-    status: notes.length > 0 ? 'ALERTA' : (linesTotalCents !== null || qrTotalCents !== null ? 'VALIDO' : 'NAO_VERIFICADO'),
+    status: notes.length > 0 ? 'ALERTA' : (qrTotalCents !== null ? 'VALIDO' : 'NAO_VERIFICADO'),
     notes: notes.join(' ')
   };
 }

@@ -37,6 +37,9 @@ const parsePortugueseQrTotal = (text: string) => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 
+const hasVatOnLines = (items: InvoiceExtractedData['items']) =>
+  items.some(item => Number(item.vatRate || 0) > 0);
+
 const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, productAliases, categories, onComplete, onQuickCreateProduct }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [pages, setPages] = useState<string[]>([]);
@@ -165,12 +168,20 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     const invoiceTotalCents = moneyCents(data.totalInvoiceAmount);
     const linesTotalCents = moneyCents(calculatedLinesTotal);
     const qrTotalCents = moneyCents(qrTotal);
+    const lineTotalsLikelyIncludeVat = hasVatOnLines(data.items) && data.items.some(item => {
+      const quantity = Number(item.quantity || 0);
+      const unitPrice = Number(item.unitPrice || 0);
+      const vatRate = Number(item.vatRate || 0);
+      const totalPrice = Number(item.totalPrice || 0);
+      const grossEstimate = quantity * unitPrice * (1 + vatRate / 100);
+      return Math.abs(totalPrice - grossEstimate) < 0.03;
+    });
     const notes: string[] = [];
 
     if (invoiceTotalCents === null) {
       notes.push('A IA não conseguiu identificar o total final da fatura.');
     }
-    if (invoiceTotalCents !== null && linesTotalCents !== null && invoiceTotalCents !== linesTotalCents) {
+    if (lineTotalsLikelyIncludeVat && invoiceTotalCents !== null && linesTotalCents !== null && invoiceTotalCents !== linesTotalCents) {
       notes.push(`Total das linhas ${formatMoney(linesTotalCents)} EUR diferente do total da fatura ${formatMoney(invoiceTotalCents)} EUR.`);
     }
     if (invoiceTotalCents !== null && qrTotalCents !== null && invoiceTotalCents !== qrTotalCents) {
@@ -466,7 +477,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                      <div className="max-w-md">
                        <p className="font-black text-sm text-slate-800 uppercase">Não consegui ler a fatura</p>
                        <p className="text-xs font-bold text-slate-400 mt-2">{processingError || 'A análise terminou sem dados suficientes.'}</p>
-                       <p className="text-[10px] font-bold text-slate-300 mt-3">O total da fatura tem de bater com as linhas e, quando lido, com o total do QR.</p>
+                       <p className="text-[10px] font-bold text-slate-300 mt-3">O total final da fatura tem de bater com o total do QR quando este for lido. As linhas podem estar sem IVA.</p>
                      </div>
                      <div className="flex flex-col sm:flex-row gap-3">
                        <button onClick={() => processAllPages(pages)} disabled={pages.length === 0} className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px] hover:bg-orange-500 disabled:opacity-40 transition-all">
