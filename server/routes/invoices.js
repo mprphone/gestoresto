@@ -354,6 +354,11 @@ invoicesRouter.post('/', async (req, res, next) => {
 
       await audit(client, req, 'create', 'purchase_invoices', invoiceId, null, { ...invoice.rows[0], lines });
       if (config.invoiceOkEmailTo) {
+        const invoiceAttachment = archiveDocument?.storage_path ? [{
+          filename: archiveDocument.original_filename || `fatura-${payload.docNumber || invoiceId}.jpg`,
+          path: archiveDocument.storage_path,
+          contentType: archiveDocument.mime_type || undefined
+        }] : [];
         await sendTrackedEmail(client, req, {
           recipient: config.invoiceOkEmailTo,
           subject: `Fatura registada: ${payload.docNumber || 'S/N'} - ${payload.supplierName || 'Fornecedor'}`,
@@ -369,6 +374,7 @@ invoicesRouter.post('/', async (req, res, next) => {
             '',
             'Estado: fatura guardada com sucesso.'
           ].join('\n'),
+          attachments: invoiceAttachment,
           relatedEntityTable: 'purchase_invoices',
           relatedEntityId: invoiceId
         });

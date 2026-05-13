@@ -1,5 +1,5 @@
 import { ArchiveDocumentType, DigitalArchiveDocument } from '../types';
-import { apiGet, apiPostForm } from './apiClient';
+import { apiGet, apiPostForm, apiUrl } from './apiClient';
 import { PageOptions, PageResult } from './pagination';
 
 const fromDb = (row: any): DigitalArchiveDocument => ({
@@ -15,7 +15,7 @@ const fromDb = (row: any): DigitalArchiveDocument => ({
   storageProvider: row.storage_provider,
   storageBucket: row.storage_bucket || undefined,
   storagePath: row.storage_path,
-  publicUrl: row.public_url || (row.id ? `/api/archive/file/${row.id}` : undefined),
+  publicUrl: apiUrl(row.public_url || (row.id ? `/api/archive/file/${row.id}` : undefined)),
   localRoot: row.local_root || '/mnt/bunker/resto',
   pageCount: Number(row.page_count || 1),
   qualityOk: row.quality_ok,

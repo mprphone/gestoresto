@@ -15,7 +15,7 @@ function transporter() {
   });
 }
 
-export async function sendTrackedEmail(client, req, { recipient, subject, body, relatedEntityTable, relatedEntityId }) {
+export async function sendTrackedEmail(client, req, { recipient, subject, body, attachments = [], relatedEntityTable, relatedEntityId }) {
   const created = await client.query(`
     insert into email_messages (recipient, subject, body, status, related_entity_table, related_entity_id)
     values ($1, $2, $3, 'PENDENTE', $4, $5)
@@ -33,7 +33,8 @@ export async function sendTrackedEmail(client, req, { recipient, subject, body, 
         from: config.smtp.from,
         to: recipient,
         subject,
-        text: body
+        text: body,
+        attachments
       });
       status = 'ENVIADO';
       providerMessageId = info.messageId || null;

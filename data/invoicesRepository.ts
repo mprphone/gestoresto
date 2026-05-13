@@ -1,5 +1,5 @@
 import { InvoiceStatus, PurchaseInvoice, PurchaseInvoiceLine } from '../types';
-import { apiGet, apiPost } from './apiClient';
+import { apiGet, apiPost, apiUrl } from './apiClient';
 import { PageOptions, PageResult } from './pagination';
 
 const invoiceFromDb = (row: any): PurchaseInvoice => ({
@@ -17,13 +17,13 @@ const invoiceFromDb = (row: any): PurchaseInvoice => ({
   date: row.date_issued,
   dueDate: row.due_date || undefined,
   status: row.status as InvoiceStatus,
-  photoUrl: row.photo_url || undefined,
+  photoUrl: apiUrl(row.photo_url || undefined),
   primaryArchiveDocumentId: row.primary_archive_document_id || undefined,
   paidAmount: Number(row.paid_amount || 0),
   lastPaymentDate: row.last_payment_date || undefined,
   lastPaymentMethod: row.last_payment_method || undefined,
   lastPaymentAccount: row.last_payment_account || undefined,
-  proofUrl: row.proof_url || undefined,
+  proofUrl: apiUrl(row.proof_url || undefined),
   digitalCompliance: {
     hasQrCode: row.has_qr_code,
     hasAtcud: row.has_atcud,

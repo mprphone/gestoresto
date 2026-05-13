@@ -4,6 +4,12 @@ const API_BASE = (
   (((import.meta as any).env.PROD as boolean) ? DEFAULT_PRODUCTION_API_URL : '')
 ).replace(/\/$/, '');
 
+export function apiUrl(path?: string) {
+  if (!path) return undefined;
+  if (/^https?:\/\//i.test(path) || path.startsWith('data:')) return path;
+  return `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
 function apiNotConfiguredMessage() {
   return `API do servidor não configurada. Use ${DEFAULT_PRODUCTION_API_URL} ou defina VITE_API_URL e faça novo deploy.`;
 }
