@@ -43,7 +43,7 @@ export const processInvoiceImage = async (base64Images: string[]): Promise<Invoi
     }));
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash-preview-05-20',
       contents: {
         parts: [
           ...imageParts,

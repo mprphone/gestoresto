@@ -245,9 +245,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     return {
       sharpness,
       brightness: avgBrightness,
-      // Relaxed thresholds: white invoice paper can hit near 245 brightness;
-      // sparse-text center areas can have low sharpness but still be readable
-      isReadable: sharpness > 4 && avgBrightness > 60 && avgBrightness < 253,
+      // Only fail on completely black/white/blank captures — everything else
+      // is accepted; real quality feedback comes from OCR success/failure
+      isReadable: avgBrightness > 15 && avgBrightness < 254,
       hasQrCode
     };
   };
