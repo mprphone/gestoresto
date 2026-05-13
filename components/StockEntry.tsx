@@ -94,9 +94,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   // Keep ref pointing to latest captureCameraPage (avoids stale closures in scan timer)
   useEffect(() => { captureCameraPageRef.current = captureCameraPage; });
 
-  // Live QR scan: runs BarcodeDetector directly on the <video> element every 600ms
+  // Live QR scan: continuously updates qrLiveDetected so brackets turn green
+  // when QR is in frame — user still taps to capture (no auto-capture)
   useEffect(() => {
-    if (!isCameraReady || !isCameraOpen || qrLiveDetected) return;
+    if (!isCameraReady || !isCameraOpen) return;
     const BarcodeDetectorCtor = (window as any).BarcodeDetector;
     if (!BarcodeDetectorCtor) return;
 
@@ -109,22 +110,15 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       if (video && video.readyState >= 2) {
         try {
           const codes = await detector.detect(video);
-          if (codes.length > 0 && codes[0].rawValue) {
-            if (!active) return;
-            setQrLiveDetected(true);
-            // Note: don't check `active` here — the effect cleanup sets active=false
-            // on re-render triggered by setQrLiveDetected, but capture must still fire
-            setTimeout(() => { captureCameraPageRef.current?.(); }, 500);
-            return;
-          }
-        } catch { /* BarcodeDetector may throw on some frames */ }
+          setQrLiveDetected(codes.length > 0 && Boolean(codes[0]?.rawValue));
+        } catch { /* ignore per-frame errors */ }
       }
       if (active) setTimeout(scan, 600);
     };
 
     scan();
     return () => { active = false; };
-  }, [isCameraReady, isCameraOpen, qrLiveDetected]);
+  }, [isCameraReady, isCameraOpen]);
 
   useEffect(() => {
     if (!isCameraOpen) return;
@@ -730,26 +724,18 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         </button>
       </div>
 
-      {/* QR scanner brackets — shown while scanning, hidden when detected */}
-      {isCameraReady && !qrLiveDetected && (window as any).BarcodeDetector && (
+      {/* QR scanner brackets — green when QR is in frame, white while scanning */}
+      {isCameraReady && (window as any).BarcodeDetector && (
         <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center">
           <div className="relative w-64 h-64">
-            <span className="absolute top-0 left-0 w-10 h-10 border-t-4 border-l-4 border-white rounded-tl-lg" />
-            <span className="absolute top-0 right-0 w-10 h-10 border-t-4 border-r-4 border-white rounded-tr-lg" />
-            <span className="absolute bottom-0 left-0 w-10 h-10 border-b-4 border-l-4 border-white rounded-bl-lg" />
-            <span className="absolute bottom-0 right-0 w-10 h-10 border-b-4 border-r-4 border-white rounded-br-lg" />
-            <span className="absolute left-2 right-2 top-1/2 h-0.5 bg-white/40 animate-pulse" />
-          </div>
-        </div>
-      )}
-
-      {/* QR detected flash */}
-      {qrLiveDetected && (
-        <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center">
-          <div className="absolute inset-0 bg-emerald-500/20 animate-pulse" />
-          <div className="relative bg-emerald-500 text-white px-8 py-5 rounded-3xl flex items-center gap-3 shadow-2xl">
-            <Check size={28} />
-            <span className="font-black uppercase text-base">QR Detetado!</span>
+            <span className={`absolute top-0 left-0 w-12 h-12 border-t-4 border-l-4 rounded-tl-xl transition-colors duration-300 ${qrLiveDetected ? 'border-emerald-400' : 'border-white/70'}`} />
+            <span className={`absolute top-0 right-0 w-12 h-12 border-t-4 border-r-4 rounded-tr-xl transition-colors duration-300 ${qrLiveDetected ? 'border-emerald-400' : 'border-white/70'}`} />
+            <span className={`absolute bottom-0 left-0 w-12 h-12 border-b-4 border-l-4 rounded-bl-xl transition-colors duration-300 ${qrLiveDetected ? 'border-emerald-400' : 'border-white/70'}`} />
+            <span className={`absolute bottom-0 right-0 w-12 h-12 border-b-4 border-r-4 rounded-br-xl transition-colors duration-300 ${qrLiveDetected ? 'border-emerald-400' : 'border-white/70'}`} />
+            {/* Status label inside brackets */}
+            <span className={`absolute inset-0 flex items-center justify-center text-[10px] font-black uppercase tracking-widest transition-colors duration-300 ${qrLiveDetected ? 'text-emerald-400' : 'text-white/40'}`}>
+              {qrLiveDetected ? '✓ QR OK' : 'QR...'}
+            </span>
           </div>
         </div>
       )}
@@ -776,11 +762,15 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         )}
         <button
           onClick={captureCameraPage}
-          disabled={!isCameraReady || qrLiveDetected}
-          className={`flex-1 sm:flex-none px-8 py-4 rounded-2xl text-white font-black uppercase text-xs transition-all flex items-center justify-center gap-2 shadow-2xl ${isCameraReady && !qrLiveDetected ? 'bg-orange-500 hover:bg-orange-600' : 'bg-orange-500/40 cursor-not-allowed'}`}
+          disabled={!isCameraReady}
+          className={`flex-1 sm:flex-none px-8 py-4 rounded-2xl text-white font-black uppercase text-xs transition-all flex items-center justify-center gap-2 shadow-2xl ${
+            !isCameraReady ? 'bg-orange-500/40 cursor-not-allowed'
+            : qrLiveDetected ? 'bg-emerald-500 hover:bg-emerald-400 scale-105'
+            : 'bg-orange-500 hover:bg-orange-600'
+          }`}
         >
           <Camera size={18} />
-          {!isCameraReady ? 'A preparar…' : qrLiveDetected ? 'A capturar…' : cameraIsMultiMode ? `Fotografar Parte ${capturedParts + 1}` : 'Fotografar'}
+          {!isCameraReady ? 'A preparar…' : qrLiveDetected ? 'Capturar — QR OK' : cameraIsMultiMode ? `Fotografar Parte ${capturedParts + 1}` : 'Fotografar'}
         </button>
       </div>
     </div>
