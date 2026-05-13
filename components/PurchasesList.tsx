@@ -59,7 +59,11 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, invoiceLines, p
   const totalPending = useMemo(() => {
     return invoices
       .filter(i => i.status !== InvoiceStatus.PAID)
-      .reduce((acc, curr) => acc + Math.max(0, curr.totalAmount - (curr.paidAmount || 0)), 0);
+      .reduce((acc, curr) => {
+        // Credit notes (negative total) reduce the pending balance
+        if (curr.totalAmount < 0) return acc + curr.totalAmount;
+        return acc + Math.max(0, curr.totalAmount - (curr.paidAmount || 0));
+      }, 0);
   }, [invoices]);
 
   const toggleSelect = (id: string) => {
@@ -203,10 +207,19 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, invoiceLines, p
                      </div>
                   </td>
                   <td className="px-6 py-4">
-                    <p className="font-black text-slate-900">€ {inv.totalAmount.toFixed(2)}</p>
+                    <p className={`font-black ${inv.totalAmount < 0 ? 'text-emerald-600' : 'text-slate-900'}`}>
+                      € {inv.totalAmount.toFixed(2)}
+                    </p>
+                    {inv.totalAmount < 0 && (
+                      <p className="text-[9px] font-black uppercase text-emerald-600">Nota de Crédito</p>
+                    )}
                   </td>
                   <td className="px-6 py-4">
-                    {inv.status === InvoiceStatus.PAID ? (
+                    {inv.totalAmount < 0 ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-[9px] font-black uppercase">
+                        Crédito
+                      </span>
+                    ) : inv.status === InvoiceStatus.PAID ? (
                       <div>
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-50 text-emerald-600 text-[9px] font-black uppercase mb-1">
                           <CheckCircle2 size={10} /> Pago
