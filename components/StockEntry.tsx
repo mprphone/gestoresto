@@ -94,10 +94,11 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   // Keep ref pointing to latest captureCameraPage (avoids stale closures in scan timer)
   useEffect(() => { captureCameraPageRef.current = captureCameraPage; });
 
-  // Live QR scan: continuously updates qrLiveDetected so brackets turn green
-  // when QR is in frame — user still taps to capture (no auto-capture)
+  // Live QR scan: scans every 600ms until QR is found, then LATCHES green.
+  // Once detected, brackets stay green regardless of phone movement so the
+  // user can re-frame the full invoice before tapping capture.
   useEffect(() => {
-    if (!isCameraReady || !isCameraOpen) return;
+    if (!isCameraReady || !isCameraOpen || qrLiveDetected) return;
     const BarcodeDetectorCtor = (window as any).BarcodeDetector;
     if (!BarcodeDetectorCtor) return;
 
@@ -110,7 +111,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       if (video && video.readyState >= 2) {
         try {
           const codes = await detector.detect(video);
-          setQrLiveDetected(codes.length > 0 && Boolean(codes[0]?.rawValue));
+          if (codes.length > 0 && codes[0]?.rawValue) {
+            setQrLiveDetected(true); // latch — stop scanning, stay green
+            return;
+          }
         } catch { /* ignore per-frame errors */ }
       }
       if (active) setTimeout(scan, 600);
@@ -118,7 +122,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
     scan();
     return () => { active = false; };
-  }, [isCameraReady, isCameraOpen]);
+  }, [isCameraReady, isCameraOpen, qrLiveDetected]);
 
   useEffect(() => {
     if (!isCameraOpen) return;
