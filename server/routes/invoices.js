@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { query, withTransaction } from '../db.js';
 import { pageRange, pageResult } from '../pagination.js';
 import { audit } from '../audit.js';
+import { config } from '../config.js';
+import { sendTrackedEmail } from '../emailService.js';
 
 export const invoicesRouter = Router();
 
@@ -302,6 +304,26 @@ invoicesRouter.post('/', async (req, res, next) => {
       }
 
       await audit(client, req, 'create', 'purchase_invoices', invoiceId, null, { ...invoice.rows[0], lines });
+      if (config.invoiceOkEmailTo) {
+        await sendTrackedEmail(client, req, {
+          recipient: config.invoiceOkEmailTo,
+          subject: `Fatura registada: ${payload.docNumber || 'S/N'} - ${payload.supplierName || 'Fornecedor'}`,
+          body: [
+            'Foi registada uma fatura no GestoResto.',
+            '',
+            `Fornecedor: ${payload.supplierName || '-'}`,
+            `NIF fornecedor: ${payload.supplierNif || '-'}`,
+            `Documento: ${payload.docNumber || 'S/N'}`,
+            `Total: ${Number(payload.totalAmount || 0).toFixed(2)} EUR`,
+            `QR: ${payload.qrTotalAmount ? `OK (${Number(payload.qrTotalAmount).toFixed(2)} EUR)` : 'Não verificado'}`,
+            `Arquivo: ${archiveDocument?.public_url || invoice.rows[0].photo_url || 'Sem URL'}`,
+            '',
+            'Estado: fatura guardada com sucesso.'
+          ].join('\n'),
+          relatedEntityTable: 'purchase_invoices',
+          relatedEntityId: invoiceId
+        });
+      }
       return { invoice: invoice.rows[0], lines, archiveDocument };
     });
     res.status(201).json(saved);

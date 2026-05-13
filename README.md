@@ -62,6 +62,7 @@ SMTP_SECURE=false
 SMTP_USER=
 SMTP_PASS=
 SMTP_FROM=
+INVOICE_OK_EMAIL_TO=geral@mrebelo.com
 IMAP_HOST=
 IMAP_PORT=993
 IMAP_SECURE=true
@@ -156,6 +157,12 @@ SMTP_FROM=
 ```
 
 Se SMTP não estiver configurado, o sistema regista o email como `SIMULADO`, para testar o fluxo sem perder histórico.
+
+Quando uma fatura é guardada com sucesso, a API envia/regista automaticamente um email para:
+
+```bash
+INVOICE_OK_EMAIL_TO=geral@mrebelo.com
+```
 
 IMAP serve para ler/receber emails de uma caixa. O envio continua a usar SMTP:
 

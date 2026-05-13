@@ -10,6 +10,7 @@ export const config = {
   databaseUser: process.env.PGUSER || process.env.USER || 'ubuntu',
   databaseHost: process.env.PGHOST || '/var/run/postgresql',
   archiveRoot: process.env.ARCHIVE_ROOT || '/mnt/bunker/resto',
+  invoiceOkEmailTo: process.env.INVOICE_OK_EMAIL_TO || 'geral@mrebelo.com',
   smtp: {
     host: process.env.SMTP_HOST || '',
     port: Number(process.env.SMTP_PORT || 587),

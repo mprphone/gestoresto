@@ -40,6 +40,13 @@ const parsePortugueseQrTotal = (text: string) => {
 const hasVatOnLines = (items: InvoiceExtractedData['items']) =>
   items.some(item => Number(item.vatRate || 0) > 0);
 
+interface PageQuality {
+  sharpness: number;
+  brightness: number;
+  isReadable: boolean;
+  hasQrCode: boolean;
+}
+
 const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, productAliases, categories, onComplete, onQuickCreateProduct }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [pages, setPages] = useState<string[]>([]);
@@ -58,6 +65,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [qrPayloads, setQrPayloads] = useState<string[]>([]);
+  const [pageQualities, setPageQualities] = useState<PageQuality[]>([]);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -117,20 +125,98 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setIsCameraOpen(false);
   };
 
-  const compressImage = (base64: string): Promise<string> => {
+  const analyzeCanvasQuality = (canvas: HTMLCanvasElement, hasQrCode = false): PageQuality => {
+    const ctx = canvas.getContext('2d');
+    const sampleWidth = Math.min(260, canvas.width);
+    const sampleHeight = Math.min(260, canvas.height);
+    const x = Math.max(0, Math.floor((canvas.width - sampleWidth) / 2));
+    const y = Math.max(0, Math.floor((canvas.height - sampleHeight) / 2));
+    const data = ctx?.getImageData(x, y, sampleWidth, sampleHeight).data;
+    if (!data) return { sharpness: 0, brightness: 0, isReadable: false, hasQrCode };
+
+    let brightness = 0;
+    let edge = 0;
+    const gray: number[] = [];
+    for (let i = 0; i < data.length; i += 4) {
+      const value = (data[i] * 0.299) + (data[i + 1] * 0.587) + (data[i + 2] * 0.114);
+      brightness += value;
+      gray.push(value);
+    }
+    for (let row = 1; row < sampleHeight; row++) {
+      for (let col = 1; col < sampleWidth; col++) {
+        const current = gray[row * sampleWidth + col];
+        edge += Math.abs(current - gray[row * sampleWidth + col - 1]);
+        edge += Math.abs(current - gray[(row - 1) * sampleWidth + col]);
+      }
+    }
+    const pixels = gray.length || 1;
+    const avgBrightness = brightness / pixels;
+    const sharpness = edge / pixels;
+    return {
+      sharpness,
+      brightness: avgBrightness,
+      isReadable: sharpness > 9 && avgBrightness > 80 && avgBrightness < 245,
+      hasQrCode
+    };
+  };
+
+  const normalizeInvoiceImage = (base64: string): Promise<{ data: string; quality: PageQuality }> => {
     return new Promise((resolve) => {
       const img = new Image();
       img.src = base64;
-      img.onerror = () => resolve(base64.split(',')[1] || base64);
+      img.onerror = () => resolve({ data: base64.split(',')[1] || base64, quality: { sharpness: 0, brightness: 0, isReadable: false, hasQrCode: false } });
       img.onload = () => {
-        const canvas = document.createElement('canvas');
         const MAX_WIDTH = 1200;
         const scale = Math.min(1, MAX_WIDTH / img.width);
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
+        const source = document.createElement('canvas');
+        source.width = Math.round(img.width * scale);
+        source.height = Math.round(img.height * scale);
+        const sourceCtx = source.getContext('2d');
+        sourceCtx?.drawImage(img, 0, 0, source.width, source.height);
+
+        const pixels = sourceCtx?.getImageData(0, 0, source.width, source.height);
+        let minX = source.width;
+        let minY = source.height;
+        let maxX = 0;
+        let maxY = 0;
+
+        if (pixels) {
+          for (let y = 0; y < source.height; y += 2) {
+            for (let x = 0; x < source.width; x += 2) {
+              const i = (y * source.width + x) * 4;
+              const r = pixels.data[i];
+              const g = pixels.data[i + 1];
+              const b = pixels.data[i + 2];
+              const brightness = (r + g + b) / 3;
+              const contrast = Math.max(r, g, b) - Math.min(r, g, b);
+              if (brightness < 238 || contrast > 28) {
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
+              }
+            }
+          }
+        }
+
+        const foundContent = maxX > minX && maxY > minY;
+        const pad = 28;
+        const cropX = foundContent ? Math.max(0, minX - pad) : 0;
+        const cropY = foundContent ? Math.max(0, minY - pad) : 0;
+        const cropW = foundContent ? Math.min(source.width - cropX, maxX - minX + pad * 2) : source.width;
+        const cropH = foundContent ? Math.min(source.height - cropY, maxY - minY + pad * 2) : source.height;
+
+        const out = document.createElement('canvas');
+        out.width = cropW;
+        out.height = cropH;
+        const outCtx = out.getContext('2d');
+        if (outCtx) {
+          outCtx.fillStyle = '#ffffff';
+          outCtx.fillRect(0, 0, out.width, out.height);
+          outCtx.filter = 'contrast(1.08) brightness(1.03)';
+          outCtx.drawImage(source, cropX, cropY, cropW, cropH, 0, 0, out.width, out.height);
+        }
+        resolve({ data: out.toDataURL('image/jpeg', 0.9).split(',')[1], quality: analyzeCanvasQuality(out) });
       };
     });
   };
@@ -290,6 +376,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setProcessingError(null);
     try {
       const newPages: string[] = [];
+      const newQualities: PageQuality[] = [];
       for (let i = 0; i < files.length; i++) {
         const reader = new FileReader();
         const p = new Promise<string>((resolve, reject) => {
@@ -297,13 +384,17 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           reader.onerror = () => reject(new Error('Falha ao ler imagem'));
         });
         reader.readAsDataURL(files[i]);
-        newPages.push(await compressImage(await p));
+        const normalized = await normalizeInvoiceImage(await p);
+        newPages.push(normalized.data);
+        newQualities.push(normalized.quality);
       }
       const updated = [...pages, ...newPages];
       const newQrPayloads = await scanQrPayloads(newPages);
       const updatedQrPayloads = [...qrPayloads, ...newQrPayloads];
+      const updatedQualities = [...pageQualities, ...newQualities.map((quality, index) => ({ ...quality, hasQrCode: Boolean(newQrPayloads[index]) }))];
       setPages(updated);
       setQrPayloads(updatedQrPayloads);
+      setPageQualities(updatedQualities);
       await processAllPages(updated, updatedQrPayloads);
     } catch (error) {
       setProcessingError('Não consegui abrir essa fotografia. Tente outro ficheiro ou tire uma nova foto.');
@@ -328,11 +419,13 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     const ctx = canvas.getContext('2d');
     ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
     const captured = canvas.toDataURL('image/jpeg', 0.86).split(',')[1];
-    const updated = [...pages, captured];
-    const newQrPayloads = await scanQrPayloads([captured]);
+    const normalized = await normalizeInvoiceImage(`data:image/jpeg;base64,${captured}`);
+    const updated = [...pages, normalized.data];
+    const newQrPayloads = await scanQrPayloads([normalized.data]);
     const updatedQrPayloads = [...qrPayloads, ...newQrPayloads];
     setPages(updated);
     setQrPayloads(updatedQrPayloads);
+    setPageQualities(prev => [...prev, { ...normalized.quality, hasQrCode: newQrPayloads.length > 0 }]);
     closeCamera();
     await processAllPages(updated, updatedQrPayloads);
   };
@@ -415,13 +508,27 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                         <button onClick={() => {
                           setPages(prev => prev.filter((_, i) => i !== idx));
                           setQrPayloads(prev => prev.filter((_, i) => i !== idx));
+                          setPageQualities(prev => prev.filter((_, i) => i !== idx));
                           setProcessingError(null);
                         }} className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"><X size={14} /></button>
+                        <span className={`absolute left-2 bottom-2 px-2 py-1 rounded-lg text-[8px] font-black uppercase ${pageQualities[idx]?.isReadable ? 'bg-emerald-500 text-white' : 'bg-orange-500 text-white'}`}>
+                          {pageQualities[idx]?.isReadable ? 'Boa leitura' : 'Rever foto'}
+                        </span>
                      </div>
                    ))}
                    <button onClick={openCamera} className="aspect-[3/4] rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-300 hover:border-orange-500 transition-all"><PlusCircle size={24} /><span className="text-[8px] font-black uppercase mt-1">Add Pág.</span></button>
                 </div>
                 {cameraError && <p className="mb-4 text-xs font-bold text-red-500">{cameraError}</p>}
+                {pageQualities.length > 0 && (
+                  <div className={`mb-4 p-4 rounded-2xl border ${pageQualities.every(q => q.isReadable) ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-orange-50 border-orange-100 text-orange-700'}`}>
+                    <p className="text-[10px] font-black uppercase">
+                      {pageQualities.every(q => q.isReadable) ? 'Imagem boa para leitura e arquivo digital' : 'Imagem pode não estar perfeita para leitura'}
+                    </p>
+                    <p className="text-[10px] font-bold opacity-70 mt-1">
+                      QR {qrPayloads.length > 0 ? 'lido' : 'não lido diretamente'} · Margens ajustadas automaticamente
+                    </p>
+                  </div>
+                )}
                 {isProcessing && <div className="flex items-center gap-3 p-4 bg-orange-50 rounded-2xl border border-orange-100 animate-pulse"><RefreshCcw className="animate-spin text-orange-500" size={20} /><p className="text-[10px] font-black text-orange-600 uppercase">Lendo Artigos...</p></div>}
              </div>
              {extractedData && isDuplicate && <div className="bg-red-600 text-white p-6 rounded-[2.5rem] shadow-xl animate-bounce flex items-start gap-4"><Copy size={32} /><div><h5 className="font-black uppercase text-sm">Fatura Duplicada!</h5><p className="text-[10px] font-bold opacity-80 mt-1">Este Nº {docNumber} já foi inserido anteriormente.</p></div></div>}
