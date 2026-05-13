@@ -27,6 +27,7 @@ interface StockMovementProps {
   movements: Movement[];
   categories: Category[];
   onTransfer: (productId: string, qty: number, type: MovementType, photoUrl?: string) => void;
+  hideStock?: boolean;
 }
 
 const getCategoryIcon = (cat: string) => {
@@ -39,7 +40,7 @@ const getCategoryIcon = (cat: string) => {
   return <Layers size={20} />;
 };
 
-const StockMovement: React.FC<StockMovementProps> = ({ products, movements, categories, onTransfer }) => {
+const StockMovement: React.FC<StockMovementProps> = ({ products, movements, categories, onTransfer, hideStock = false }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [step, setStep] = useState<'TYPE' | 'CATEGORY' | 'PRODUCT' | 'ENTRY'>('TYPE');
   const [movementType, setMovementType] = useState<MovementType>(MovementType.EXIT);
@@ -62,7 +63,7 @@ const StockMovement: React.FC<StockMovementProps> = ({ products, movements, cate
   const addItemToCart = () => {
     if (!selectedProduct || !tempQty) return;
     const qty = parseFloat(tempQty);
-    if (movementType !== MovementType.ENTRY && selectedProduct.currentStock < qty) {
+    if (movementType !== MovementType.ENTRY && !hideStock && selectedProduct.currentStock < qty) {
       alert("Stock insuficiente!");
       return;
     }
@@ -159,7 +160,8 @@ const StockMovement: React.FC<StockMovementProps> = ({ products, movements, cate
               <button key={p.id} onClick={() => { setSelectedProduct(p); setStep('ENTRY'); }} className="p-5 bg-white border border-slate-200 rounded-2xl flex justify-between items-center hover:border-slate-900 transition-all text-left">
                 <div>
                   <p className="font-black text-slate-800">{p.name}</p>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase">Disponível: {p.currentStock} {p.unit}</p>
+                  {!hideStock && <p className="text-[10px] text-slate-400 font-bold uppercase">Disponível: {p.currentStock} {p.unit}</p>}
+                  {hideStock && <p className="text-[10px] text-slate-400 font-bold uppercase">{p.unit}</p>}
                 </div>
                 <ChevronRight size={18} className="text-slate-300" />
               </button>

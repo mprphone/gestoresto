@@ -56,7 +56,10 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('gestoresto_user');
     return saved ? JSON.parse(saved) : null;
   });
-  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'restaurant' | 'employees'>('dash');
+  const isFuncionario = currentUser?.role === 'funcionario';
+  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'restaurant' | 'employees'>(() =>
+    currentUser?.role === 'funcionario' ? 'entry' : 'dash'
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
@@ -316,22 +319,30 @@ const App: React.FC = () => {
           <UtensilsCrossed className="text-orange-500 w-8 h-8" />
           <h1 className="font-black text-2xl tracking-tighter uppercase italic">GestoRestô</h1>
         </div>
-        <nav className="flex-1 px-6 space-y-1">
-          <NavItem icon={<LayoutDashboard />} label="Dashboard" active={activeTab === 'dash'} onClick={() => setActiveTab('dash')} />
-          <NavItem icon={<Package />} label="Stock Central" active={activeTab === 'inv'} onClick={() => setActiveTab('inv')} />
-          <NavItem icon={<ArrowRightLeft />} label="Saída / Quebra" active={activeTab === 'move'} onClick={() => setActiveTab('move')} />
-          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-8 mb-2 px-5 text-center">Gestão IA</p>
-          <NavItem icon={<PlusCircle />} label="Nova Fatura" active={activeTab === 'entry'} onClick={() => setActiveTab('entry')} />
-          <NavItem icon={<Wallet />} label="Pagamentos" active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} />
-          <NavItem icon={<Building2 />} label="Fornecedores" active={activeTab === 'suppliers'} onClick={() => setActiveTab('suppliers')} />
-          <NavItem icon={<Store />} label="Restaurante" active={activeTab === 'restaurant'} onClick={() => setActiveTab('restaurant')} />
-          {currentUser.role === 'admin' && <NavItem icon={<Users />} label="Funcionários" active={activeTab === 'employees'} onClick={() => setActiveTab('employees')} />}
-          <NavItem icon={<BookOpen />} label="Catálogo" active={activeTab === 'catalog'} onClick={() => setActiveTab('catalog')} />
-          <NavItem icon={<Link2 />} label="Equivalências" active={activeTab === 'equiv'} onClick={() => setActiveTab('equiv')} />
-          <NavItem icon={<BarChart3 />} label="Análises" active={activeTab === 'rep'} onClick={() => setActiveTab('rep')} />
-        </nav>
+        {isFuncionario ? (
+          <nav className="flex-1 px-6 space-y-1">
+            <NavItem icon={<PlusCircle />} label="Nova Fatura" active={activeTab === 'entry'} onClick={() => setActiveTab('entry')} />
+            <NavItem icon={<ArrowRightLeft />} label="Saída / Quebra" active={activeTab === 'move'} onClick={() => setActiveTab('move')} />
+          </nav>
+        ) : (
+          <nav className="flex-1 px-6 space-y-1">
+            <NavItem icon={<LayoutDashboard />} label="Dashboard" active={activeTab === 'dash'} onClick={() => setActiveTab('dash')} />
+            <NavItem icon={<Package />} label="Stock Central" active={activeTab === 'inv'} onClick={() => setActiveTab('inv')} />
+            <NavItem icon={<ArrowRightLeft />} label="Saída / Quebra" active={activeTab === 'move'} onClick={() => setActiveTab('move')} />
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-8 mb-2 px-5 text-center">Gestão IA</p>
+            <NavItem icon={<PlusCircle />} label="Nova Fatura" active={activeTab === 'entry'} onClick={() => setActiveTab('entry')} />
+            <NavItem icon={<Wallet />} label="Pagamentos" active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} />
+            <NavItem icon={<Building2 />} label="Fornecedores" active={activeTab === 'suppliers'} onClick={() => setActiveTab('suppliers')} />
+            <NavItem icon={<Store />} label="Restaurante" active={activeTab === 'restaurant'} onClick={() => setActiveTab('restaurant')} />
+            {currentUser.role === 'admin' && <NavItem icon={<Users />} label="Funcionários" active={activeTab === 'employees'} onClick={() => setActiveTab('employees')} />}
+            <NavItem icon={<BookOpen />} label="Catálogo" active={activeTab === 'catalog'} onClick={() => setActiveTab('catalog')} />
+            <NavItem icon={<Link2 />} label="Equivalências" active={activeTab === 'equiv'} onClick={() => setActiveTab('equiv')} />
+            <NavItem icon={<BarChart3 />} label="Análises" active={activeTab === 'rep'} onClick={() => setActiveTab('rep')} />
+          </nav>
+        )}
         <div className="p-6 border-t border-slate-800">
-          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">{currentUser.name}</p>
+          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{currentUser.name}</p>
+          {isFuncionario && <p className="text-[9px] font-bold text-orange-400 uppercase tracking-widest mb-2">Funcionário</p>}
           <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all font-bold text-sm">
             <LogOut size={18} /> Sair
           </button>
@@ -343,35 +354,67 @@ const App: React.FC = () => {
           <h2 className="text-2xl font-black text-slate-800 tracking-tight uppercase">
             {activeTab === 'entry' ? "Entrada IA no Stock" : activeTab.toUpperCase()}
           </h2>
-          <AlertsPanel products={products} batches={[]} invoices={invoices} restaurantProfile={restaurantProfile} />
+          <div className="flex items-center gap-3">
+            {isFuncionario && <span className="hidden sm:inline text-[10px] font-black text-orange-500 uppercase tracking-widest border border-orange-200 bg-orange-50 rounded-lg px-2 py-1">{currentUser.name}</span>}
+            {!isFuncionario && <AlertsPanel products={products} batches={[]} invoices={invoices} restaurantProfile={restaurantProfile} />}
+          </div>
         </header>
 
         <div className="p-6 md:p-10 flex-1 pb-32">
           {isLoading && <div className="bg-white border border-slate-200 rounded-3xl p-10 text-center text-slate-400 font-black uppercase text-xs tracking-widest">A carregar dados do PostgreSQL...</div>}
           {loadError && <div className="bg-red-50 border border-red-100 rounded-3xl p-6 text-red-600 font-bold text-sm mb-6">{loadError}</div>}
           {!isLoading && !loadError && <>
-          {activeTab === 'dash' && <Dashboard products={products} movements={movements} />}
-          {activeTab === 'inv' && <InventoryList products={products} movements={movements} categories={categories} />}
-          {activeTab === 'move' && <StockMovement products={products} movements={movements} onTransfer={handleStockMovement} categories={categories} />}
           {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} productAliases={productAliases} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} />}
-          {activeTab === 'suppliers' && <SupplierManagement suppliers={suppliers} />}
-          {activeTab === 'restaurant' && <RestaurantSettings profile={restaurantProfile} onSave={handleSaveRestaurantProfile} />}
-          {activeTab === 'employees' && <EmployeesManagement users={users} onSave={handleSaveUser} />}
-          {activeTab === 'finance' && <PurchasesList invoices={invoices} invoiceLines={invoiceLines} products={products} archiveDocuments={archiveDocuments} payments={payments} onMarkAsPaid={handleMarkAsPaid} />}
-          {activeTab === 'catalog' && (
-            <ProductCatalog 
-              products={products} 
-              onAddProduct={handleCreateProduct} 
-              onUpdateProduct={handleUpdateProduct}
-              onDeleteProduct={handleDeleteProduct}
-              categories={categories}
-              onAddCategory={handleAddCategory}
-            />
-          )}
-          {activeTab === 'equiv' && <EquivalencesManagement products={products} suppliers={suppliers} aliases={productAliases} onChanged={refreshData} />}
-          {activeTab === 'rep' && <Reports products={products} movements={movements} />}
+          {activeTab === 'move' && <StockMovement products={products} movements={movements} onTransfer={handleStockMovement} categories={categories} hideStock={isFuncionario} />}
+          {!isFuncionario && <>
+            {activeTab === 'dash' && <Dashboard products={products} movements={movements} />}
+            {activeTab === 'inv' && <InventoryList products={products} movements={movements} categories={categories} />}
+            {activeTab === 'suppliers' && <SupplierManagement suppliers={suppliers} />}
+            {activeTab === 'restaurant' && <RestaurantSettings profile={restaurantProfile} onSave={handleSaveRestaurantProfile} />}
+            {activeTab === 'employees' && <EmployeesManagement users={users} onSave={handleSaveUser} />}
+            {activeTab === 'finance' && <PurchasesList invoices={invoices} invoiceLines={invoiceLines} products={products} archiveDocuments={archiveDocuments} payments={payments} onMarkAsPaid={handleMarkAsPaid} />}
+            {activeTab === 'catalog' && (
+              <ProductCatalog
+                products={products}
+                onAddProduct={handleCreateProduct}
+                onUpdateProduct={handleUpdateProduct}
+                onDeleteProduct={handleDeleteProduct}
+                categories={categories}
+                onAddCategory={handleAddCategory}
+              />
+            )}
+            {activeTab === 'equiv' && <EquivalencesManagement products={products} suppliers={suppliers} aliases={productAliases} onChanged={refreshData} />}
+            {activeTab === 'rep' && <Reports products={products} movements={movements} />}
+          </>}
           </>}
         </div>
+
+        {/* Mobile bottom nav — only for funcionario (sidebar is hidden on mobile) */}
+        {isFuncionario && (
+          <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-200 flex pb-[env(safe-area-inset-bottom)]">
+            <button
+              onClick={() => setActiveTab('entry')}
+              className={`flex-1 flex flex-col items-center gap-1 py-3 text-[9px] font-black uppercase transition-colors ${activeTab === 'entry' ? 'text-orange-500' : 'text-slate-400'}`}
+            >
+              <PlusCircle size={22} />
+              Nova Fatura
+            </button>
+            <button
+              onClick={() => setActiveTab('move')}
+              className={`flex-1 flex flex-col items-center gap-1 py-3 text-[9px] font-black uppercase transition-colors ${activeTab === 'move' ? 'text-orange-500' : 'text-slate-400'}`}
+            >
+              <ArrowRightLeft size={22} />
+              Saída / Quebra
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex-1 flex flex-col items-center gap-1 py-3 text-[9px] font-black uppercase text-slate-300"
+            >
+              <LogOut size={22} />
+              Sair
+            </button>
+          </nav>
+        )}
       </main>
     </div>
   );

@@ -65,6 +65,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [docNumber, setDocNumber] = useState('');
   const [isDuplicate, setIsDuplicate] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
+  const [cameraIsMultiMode, setCameraIsMultiMode] = useState(false);
+  const [capturedParts, setCapturedParts] = useState(0);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [qrPayloads, setQrPayloads] = useState<string[]>([]);
@@ -89,11 +92,26 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   useEffect(() => {
     if (!isCameraOpen) return;
 
+    setIsCameraReady(false);
     const stream = cameraStreamRef.current;
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-      videoRef.current.play().catch(() => undefined);
-    }
+    const video = videoRef.current;
+    if (!video || !stream) return;
+
+    let warmupTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const onCanPlay = () => {
+      // iOS needs extra time after canplay for the sensor to deliver real frames
+      warmupTimer = setTimeout(() => setIsCameraReady(true), 600);
+    };
+
+    video.addEventListener('canplay', onCanPlay);
+    video.srcObject = stream;
+    video.play().catch(() => undefined);
+
+    return () => {
+      video.removeEventListener('canplay', onCanPlay);
+      if (warmupTimer) clearTimeout(warmupTimer);
+    };
   }, [isCameraOpen]);
 
   useEffect(() => {
@@ -156,6 +174,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const closeCamera = () => {
     stopCamera();
     setIsCameraOpen(false);
+    setIsCameraReady(false);
+    setCameraIsMultiMode(false);
+    setCapturedParts(0);
   };
 
   const analyzeCanvasQuality = (canvas: HTMLCanvasElement, hasQrCode = false): PageQuality => {
@@ -193,13 +214,13 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     };
   };
 
-  const normalizeInvoiceImage = (base64: string): Promise<{ data: string; quality: PageQuality }> => {
+  const normalizeInvoiceImage = (base64: string): Promise<{ data: string; quality: PageQuality; width: number; height: number }> => {
     return new Promise((resolve) => {
       const img = new Image();
       img.src = base64;
-      img.onerror = () => resolve({ data: base64.split(',')[1] || base64, quality: { sharpness: 0, brightness: 0, isReadable: false, hasQrCode: false } });
+      img.onerror = () => resolve({ data: base64.split(',')[1] || base64, quality: { sharpness: 0, brightness: 0, isReadable: false, hasQrCode: false }, width: 0, height: 0 });
       img.onload = () => {
-        const MAX_WIDTH = 1200;
+        const MAX_WIDTH = 2000;
         const scale = Math.min(1, MAX_WIDTH / img.width);
         const source = document.createElement('canvas');
         source.width = Math.round(img.width * scale);
@@ -208,36 +229,64 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         sourceCtx?.drawImage(img, 0, 0, source.width, source.height);
 
         const pixels = sourceCtx?.getImageData(0, 0, source.width, source.height);
-        let minX = source.width;
-        let minY = source.height;
-        let maxX = 0;
-        let maxY = 0;
+
+        // Build per-column and per-row average brightness profiles.
+        // We look for the BRIGHT region (the paper) against a dark background,
+        // so we search for columns/rows with high average brightness (> PAPER_THRESHOLD).
+        const colProfile = new Float32Array(source.width);
+        const rowProfile = new Float32Array(source.height);
+        const step = 3;
 
         if (pixels) {
-          for (let y = 0; y < source.height; y += 2) {
-            for (let x = 0; x < source.width; x += 2) {
+          for (let y = 0; y < source.height; y += step) {
+            for (let x = 0; x < source.width; x += step) {
               const i = (y * source.width + x) * 4;
-              const r = pixels.data[i];
-              const g = pixels.data[i + 1];
-              const b = pixels.data[i + 2];
-              const brightness = (r + g + b) / 3;
-              const contrast = Math.max(r, g, b) - Math.min(r, g, b);
-              if (brightness < 238 || contrast > 28) {
-                minX = Math.min(minX, x);
-                minY = Math.min(minY, y);
-                maxX = Math.max(maxX, x);
-                maxY = Math.max(maxY, y);
-              }
+              const lum = pixels.data[i] * 0.299 + pixels.data[i + 1] * 0.587 + pixels.data[i + 2] * 0.114;
+              colProfile[x] += lum;
+              rowProfile[y] += lum;
             }
           }
+          const colSamples = Math.ceil(source.height / step);
+          const rowSamples = Math.ceil(source.width / step);
+          for (let x = 0; x < source.width; x += step) colProfile[x] /= colSamples;
+          for (let y = 0; y < source.height; y += step) rowProfile[y] /= rowSamples;
+          // Fill non-sampled positions by propagating nearest value
+          for (let x = 1; x < source.width; x++) if (colProfile[x] === 0) colProfile[x] = colProfile[x - 1];
+          for (let y = 1; y < source.height; y++) if (rowProfile[y] === 0) rowProfile[y] = rowProfile[y - 1];
         }
 
-        const foundContent = maxX > minX && maxY > minY;
-        const pad = 28;
+        // Smooth with a sliding window to tolerate shadows and dense text rows
+        const smoothArr = (arr: Float32Array, w: number): Float32Array => {
+          const out = new Float32Array(arr.length);
+          for (let i = 0; i < arr.length; i++) {
+            let sum = 0, cnt = 0;
+            for (let j = Math.max(0, i - w); j <= Math.min(arr.length - 1, i + w); j++) { sum += arr[j]; cnt++; }
+            out[i] = cnt > 0 ? sum / cnt : arr[i];
+          }
+          return out;
+        };
+        const colSmooth = smoothArr(colProfile, 25);
+        const rowSmooth = smoothArr(rowProfile, 25);
+
+        // Paper brightness threshold: paper columns average > 140, dark background < 100
+        const PAPER_THRESHOLD = 140;
+        let minX = 0, maxX = source.width - 1;
+        let minY = 0, maxY = source.height - 1;
+        for (let x = 0; x < source.width; x++) { if (colSmooth[x] >= PAPER_THRESHOLD) { minX = x; break; } }
+        for (let x = source.width - 1; x >= 0; x--) { if (colSmooth[x] >= PAPER_THRESHOLD) { maxX = x; break; } }
+        for (let y = 0; y < source.height; y++) { if (rowSmooth[y] >= PAPER_THRESHOLD) { minY = y; break; } }
+        for (let y = source.height - 1; y >= 0; y--) { if (rowSmooth[y] >= PAPER_THRESHOLD) { maxY = y; break; } }
+
+        const detectedW = maxX - minX;
+        const detectedH = maxY - minY;
+        // Only crop if the detected paper region is meaningfully smaller than the full image
+        const foundContent = detectedW > source.width * 0.1 && detectedH > source.height * 0.1
+          && (detectedW < source.width * 0.95 || detectedH < source.height * 0.95);
+        const pad = 20;
         const cropX = foundContent ? Math.max(0, minX - pad) : 0;
         const cropY = foundContent ? Math.max(0, minY - pad) : 0;
-        const cropW = foundContent ? Math.min(source.width - cropX, maxX - minX + pad * 2) : source.width;
-        const cropH = foundContent ? Math.min(source.height - cropY, maxY - minY + pad * 2) : source.height;
+        const cropW = foundContent ? Math.min(source.width - cropX, detectedW + pad * 2) : source.width;
+        const cropH = foundContent ? Math.min(source.height - cropY, detectedH + pad * 2) : source.height;
 
         const out = document.createElement('canvas');
         out.width = cropW;
@@ -249,7 +298,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           outCtx.filter = 'contrast(1.08) brightness(1.03)';
           outCtx.drawImage(source, cropX, cropY, cropW, cropH, 0, 0, out.width, out.height);
         }
-        resolve({ data: out.toDataURL('image/jpeg', 0.9).split(',')[1], quality: analyzeCanvasQuality(out) });
+        resolve({ data: out.toDataURL('image/jpeg', 0.92).split(',')[1], quality: analyzeCanvasQuality(out), width: out.width, height: out.height });
       };
     });
   };
@@ -339,9 +388,17 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       }
 
       const validation = validateTotals(data, currentQrPayloads);
+
+      // Build non-blocking warnings (total mismatch, missing pages) — don't block extraction
+      const warnings: string[] = [];
+      if (data.digitalCompliance.isMissingPages) {
+        warnings.push('Parece faltar parte do talão — adicione mais fotos e analise de novo.');
+      }
       if (validation.notes.length > 0) {
-        setProcessingError(validation.notes.join(' '));
-        return;
+        warnings.push(...validation.notes);
+      }
+      if (warnings.length > 0) {
+        setProcessingError(warnings.join(' '));
       }
 
       setExtractedData(validation.data);
@@ -437,21 +494,21 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
   const captureCameraPage = async () => {
     const video = videoRef.current;
-    if (!video || video.readyState < 2) {
-      setCameraError('A câmara ainda não está pronta. Espere um segundo e tente novamente.');
+    if (!video || !isCameraReady || video.readyState < 2) {
+      setCameraError('A câmara ainda não está pronta. Aguarde um momento e tente novamente.');
       return;
     }
 
     const canvas = document.createElement('canvas');
     const sourceWidth = video.videoWidth || 1280;
     const sourceHeight = video.videoHeight || 720;
-    const maxWidth = 1400;
+    const maxWidth = 2000;
     const scale = Math.min(1, maxWidth / sourceWidth);
     canvas.width = Math.round(sourceWidth * scale);
     canvas.height = Math.round(sourceHeight * scale);
     const ctx = canvas.getContext('2d');
     ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const captured = canvas.toDataURL('image/jpeg', 0.86).split(',')[1];
+    const captured = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
     const normalized = await normalizeInvoiceImage(`data:image/jpeg;base64,${captured}`);
     const updated = [...pages, normalized.data];
     const newQrPayloads = await scanQrPayloads([normalized.data]);
@@ -459,8 +516,32 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setPages(updated);
     setQrPayloads(updatedQrPayloads);
     setPageQualities(prev => [...prev, { ...normalized.quality, hasQrCode: newQrPayloads.length > 0 }]);
+
+    // Detect long invoice: paper aspect ratio height/width > 2.5
+    const isLong = normalized.width > 0 && (normalized.height / normalized.width) > 2.5;
+    const newPartCount = capturedParts + 1;
+
+    if (isLong || cameraIsMultiMode) {
+      setCameraIsMultiMode(true);
+      setCapturedParts(newPartCount);
+      setIsCameraReady(false); // brief reset so user doesn't double-tap
+      // Auto-analyse after 3 parts
+      if (newPartCount >= 3) {
+        closeCamera();
+        await processAllPages(updated, updatedQrPayloads);
+      }
+      // else: camera stays open — user taps "Analisar" or "Fotografar Parte X"
+    } else {
+      closeCamera();
+      await processAllPages(updated, updatedQrPayloads);
+    }
+  };
+
+  const analyzeCameraParts = async () => {
+    const currentPages = pages;
+    const currentQrPayloads = qrPayloads;
     closeCamera();
-    await processAllPages(updated, updatedQrPayloads);
+    await processAllPages(currentPages, currentQrPayloads);
   };
 
   const confirmEntry = async () => {
@@ -546,18 +627,50 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       />
       <div className="absolute top-0 left-0 right-0 z-10 p-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between text-white bg-gradient-to-b from-black/75 to-transparent">
         <div>
-          <h4 className="font-black uppercase text-sm">Câmara</h4>
-          <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Enquadre a fatura e fotografe</p>
+          {cameraIsMultiMode ? (
+            <>
+              <div className="flex items-center gap-2 mb-1">
+                {[1, 2, 3].map(n => (
+                  <span key={n} className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black ${n <= capturedParts ? 'bg-emerald-500 text-white' : 'bg-white/20 text-white/50'}`}>{n <= capturedParts ? '✓' : n}</span>
+                ))}
+              </div>
+              <p className="text-[10px] font-bold text-white/60 uppercase tracking-widest">
+                {capturedParts === 0 ? 'Fotografe a parte seguinte' : `Parte ${capturedParts} capturada — fotografe a continuação`}
+              </p>
+            </>
+          ) : (
+            <>
+              <h4 className="font-black uppercase text-sm">Câmara</h4>
+              <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Enquadre a fatura e fotografe</p>
+            </>
+          )}
         </div>
         <button onClick={closeCamera} className="p-3 bg-white/10 hover:bg-white/20 rounded-full transition-colors">
           <X size={20} />
         </button>
       </div>
+      {cameraIsMultiMode && capturedParts > 0 && (
+        <div className="absolute top-20 left-4 right-4 z-10 p-3 rounded-2xl bg-emerald-500/90 text-white text-[10px] font-black uppercase flex items-center gap-2">
+          <Check size={14} /> {capturedParts === 1 ? '1 parte capturada' : `${capturedParts} partes capturadas`} — enquadre a parte seguinte e fotografe
+        </div>
+      )}
       {cameraError && <p className="absolute left-4 right-4 bottom-28 z-10 p-3 rounded-2xl bg-red-500/90 text-xs font-bold text-white">{cameraError}</p>}
       <div className="absolute left-0 right-0 bottom-0 z-10 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex gap-3 justify-end bg-gradient-to-t from-black/80 to-transparent">
         <button onClick={closeCamera} className="px-5 py-4 rounded-2xl border border-white/10 text-white/80 font-black uppercase text-xs hover:text-white hover:bg-white/10 transition-all">Cancelar</button>
-        <button onClick={captureCameraPage} className="flex-1 sm:flex-none px-8 py-4 rounded-2xl bg-orange-500 text-white font-black uppercase text-xs hover:bg-orange-600 transition-all flex items-center justify-center gap-2 shadow-2xl">
-          <Camera size={18} /> Fotografar
+        {cameraIsMultiMode && capturedParts > 0 && (
+          <button
+            onClick={analyzeCameraParts}
+            className="px-6 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-xs transition-all flex items-center justify-center gap-2 shadow-xl"
+          >
+            <Check size={16} /> Analisar {capturedParts} {capturedParts === 1 ? 'parte' : 'partes'}
+          </button>
+        )}
+        <button
+          onClick={captureCameraPage}
+          disabled={!isCameraReady}
+          className={`flex-1 sm:flex-none px-8 py-4 rounded-2xl text-white font-black uppercase text-xs transition-all flex items-center justify-center gap-2 shadow-2xl ${isCameraReady ? 'bg-orange-500 hover:bg-orange-600' : 'bg-orange-500/40 cursor-not-allowed'}`}
+        >
+          <Camera size={18} /> {!isCameraReady ? 'A preparar…' : cameraIsMultiMode ? `Fotografar Parte ${capturedParts + 1}` : 'Fotografar'}
         </button>
       </div>
     </div>
