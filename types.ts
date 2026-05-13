@@ -99,6 +99,7 @@ export interface InvoiceDigitalCompliance {
   calculatedLinesTotal?: number;
   totalValidationStatus?: 'VALIDO' | 'ALERTA' | 'NAO_VERIFICADO';
   totalValidationNotes?: string;
+  confidenceScore?: number;
 }
 
 export interface PurchaseInvoiceLine {
@@ -212,6 +213,7 @@ export interface StockEntryLineInput {
   quantityStock?: number;
   unitStock?: string;
   vatRate?: number;
+  confidence?: number;
   expiryDate?: string;
 }
 

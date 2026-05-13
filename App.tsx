@@ -217,7 +217,8 @@ const App: React.FC = () => {
         unitPrice: item.unitPrice,
         totalPrice: item.totalPrice,
         vatRate: item.vatRate,
-        expiryDate: item.expiryDate
+        expiryDate: item.expiryDate,
+        confidence: item.confidence
       };
     });
 
