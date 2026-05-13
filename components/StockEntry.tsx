@@ -920,8 +920,11 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     </div>
   ) : null;
 
+  const matchedItemsCount = extractedData ? extractedData.items.filter((_, idx) => mapping[idx]).length : 0;
+  const totalItemsCount = extractedData?.items.length || 0;
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-20">
+    <div className="max-w-6xl mx-auto space-y-4 sm:space-y-6 pb-28 sm:pb-20">
       <input type="file" accept="image/*" multiple className="hidden" ref={fileInputRef} onChange={(e) => handleFiles(e.target.files)} />
 
       {!extractedData && !isProcessing && pages.length === 0 && (
@@ -939,8 +942,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
       {(pages.length > 0 || isProcessing) && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          <div className="lg:col-span-4 space-y-4">
-             <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm">
+          <div className={`${extractedData ? 'hidden lg:block' : ''} lg:col-span-4 space-y-4`}>
+             <div className="bg-white p-4 sm:p-6 rounded-[1.75rem] sm:rounded-[2.5rem] border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-center mb-6"><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Digitalização</h4><span className="text-xs font-black text-orange-500">{pages.length} docs</span></div>
                 <div className="grid grid-cols-2 gap-3 mb-6">
                    {pages.map((p, idx) => (
@@ -978,13 +981,29 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           <div className="lg:col-span-8 space-y-6">
              {extractedData ? (
                <div className="animate-in slide-in-from-right-4">
-                 <div className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-200 space-y-8">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                       <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fornecedor</label><input type="text" className="w-full px-5 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs" value={supplier} onChange={(e) => setSupplier(e.target.value)} /></div>
-                       <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">NIF</label><input type="text" className="w-full px-5 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs" value={nif} onChange={(e) => setNif(e.target.value)} /></div>
-                       <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nº Fatura</label><input type="text" className={`w-full px-5 py-3 border rounded-xl font-bold text-xs ${isDuplicate ? 'bg-red-50 border-red-500 text-red-600' : 'bg-slate-50 border-slate-200'}`} value={docNumber} onChange={(e) => setDocNumber(e.target.value)} /></div>
+                 <div className="bg-white p-4 sm:p-8 rounded-[1.5rem] sm:rounded-[3rem] shadow-sm border border-slate-200 space-y-4 sm:space-y-8">
+                    <div className="sticky top-0 z-20 -mx-4 -mt-4 sm:mx-0 sm:mt-0 p-4 sm:p-0 bg-white/95 sm:bg-transparent backdrop-blur border-b border-slate-100 sm:border-0">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                          <p className="text-[8px] font-black text-slate-400 uppercase">Total</p>
+                          <p className="text-lg font-black text-slate-900">€ {extractedData.totalInvoiceAmount.toFixed(2)}</p>
+                        </div>
+                        <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                          <p className="text-[8px] font-black text-slate-400 uppercase">Artigos</p>
+                          <p className="text-lg font-black text-orange-600">{matchedItemsCount}/{totalItemsCount}</p>
+                        </div>
+                        <div className={`p-3 rounded-2xl border ${confidenceStyle(extractedData.digitalCompliance?.confidenceScore)}`}>
+                          <p className="text-[8px] font-black uppercase">Conf.</p>
+                          <p className="text-lg font-black">{extractedData.digitalCompliance?.confidenceScore ?? 0}%</p>
+                        </div>
+                      </div>
                     </div>
-                    <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${confidenceStyle(extractedData.digitalCompliance?.confidenceScore)}`}>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6">
+                       <div className="space-y-1"><label className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Fornecedor</label><input type="text" className="w-full px-4 sm:px-5 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs" value={supplier} onChange={(e) => setSupplier(e.target.value)} /></div>
+                       <div className="space-y-1"><label className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">NIF</label><input type="text" className="w-full px-4 sm:px-5 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs" value={nif} onChange={(e) => setNif(e.target.value)} /></div>
+                       <div className="space-y-1"><label className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Nº Fatura</label><input type="text" className={`w-full px-4 sm:px-5 py-3 border rounded-xl font-bold text-xs ${isDuplicate ? 'bg-red-50 border-red-500 text-red-600' : 'bg-slate-50 border-slate-200'}`} value={docNumber} onChange={(e) => setDocNumber(e.target.value)} /></div>
+                    </div>
+                    <div className={`hidden sm:flex p-4 rounded-2xl border flex-col sm:flex-row sm:items-center justify-between gap-3 ${confidenceStyle(extractedData.digitalCompliance?.confidenceScore)}`}>
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-widest">Confiança da validação</p>
                         <p className="text-[10px] font-bold opacity-80 mt-1">
@@ -993,9 +1012,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                       </div>
                       <p className="text-2xl font-black">{extractedData.digitalCompliance?.confidenceScore ?? 0}%</p>
                     </div>
-                    <div className="space-y-4">
-                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-4">Conferência opcional: Família e Artigo</h5>
-                       <div className="space-y-6">
+                    <div className="space-y-3 sm:space-y-4">
+                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-3 sm:pb-4">Conferência rápida</h5>
+                       <div className="space-y-3 sm:space-y-6">
                           {extractedData.items.map((item, idx) => {
                             const isMapped = !!mapping[idx];
                             const currentFamily = itemFamilies[idx] || 'Outros';
@@ -1004,17 +1023,31 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                             const factor = conversionFactors[idx] || 1;
                             const stockQty = item.quantity * factor;
                             return (
-                              <div key={idx} className={`p-6 rounded-[2rem] border transition-all ${isMapped ? 'bg-white border-slate-100 shadow-sm' : 'bg-orange-50 border-orange-100'}`}>
-                                <div className="flex flex-col md:flex-row gap-6">
-                                  <div className="md:w-1/3"><p className="text-[8px] font-black text-slate-400 uppercase mb-1">Na Fatura:</p><p className="text-xs font-black text-slate-800 line-clamp-2">{item.name}</p><div className="mt-2 text-[10px] font-black text-slate-900">€ {item.totalPrice.toFixed(2)}</div><p className="text-[9px] font-bold text-slate-400 mt-1">{item.quantity} {item.unit || 'un'}</p></div>
-                                  <div className="flex-1 space-y-4">
-                                     <div className="space-y-1"><label className="text-[8px] font-black text-slate-400 uppercase">1. Escolher Família</label><select className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase outline-none" value={currentFamily} onChange={(e) => { setItemFamilies(prev => ({ ...prev, [idx]: e.target.value })); setMapping(prev => { const n = {...prev}; delete n[idx]; return n; }); }}>{categories.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-                                     <div className="space-y-2"><label className="text-[8px] font-black text-slate-400 uppercase">2. Associar ao Inventário</label>
+                              <div key={idx} className={`p-3 sm:p-6 rounded-2xl sm:rounded-[2rem] border transition-all ${isMapped ? 'bg-white border-slate-100 shadow-sm' : 'bg-orange-50 border-orange-100'}`}>
+                                <div className="flex flex-col md:flex-row gap-3 sm:gap-6">
+                                  <div className="md:w-1/3">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-black text-slate-800 leading-snug">{item.name}</p>
+                                        <p className="text-[10px] font-bold text-slate-400 mt-1">{item.quantity} {item.unit || 'un'} · € {item.totalPrice.toFixed(2)}</p>
+                                      </div>
+                                      <span className={`shrink-0 px-2 py-1 rounded-lg border text-[8px] font-black ${confidenceStyle(matchConfidences[idx])}`}>{matchConfidences[idx] || 0}%</span>
+                                    </div>
+                                  </div>
+                                  <div className="flex-1 space-y-3 sm:space-y-4">
+                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                       <div className="space-y-1"><label className="text-[8px] font-black text-slate-400 uppercase">Família</label><select className="w-full px-3 sm:px-4 py-3 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase outline-none" value={currentFamily} onChange={(e) => { setItemFamilies(prev => ({ ...prev, [idx]: e.target.value })); setMapping(prev => { const n = {...prev}; delete n[idx]; return n; }); }}>{categories.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+                                       <div className="space-y-1 sm:hidden">
+                                         <label className="text-[8px] font-black text-slate-400 uppercase">Entra</label>
+                                         <div className="px-3 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase">{stockQty.toFixed(3)} {selectedProduct?.unit || 'un'}</div>
+                                       </div>
+                                     </div>
+                                     <div className="space-y-2"><label className="text-[8px] font-black text-slate-400 uppercase">Inventário</label>
                                         {isMapped ? (
-                                          <div className="flex items-center gap-2 px-4 py-3 bg-emerald-50 border border-emerald-100 rounded-xl"><Check className="text-emerald-500" size={16} /><p className="text-[10px] font-black text-emerald-700 uppercase flex-1">{selectedProduct?.name}</p><span className={`px-2 py-1 rounded-lg border text-[8px] font-black ${confidenceStyle(matchConfidences[idx])}`}>{matchConfidences[idx] || 0}%</span><button onClick={() => setMapping(prev => { const n = {...prev}; delete n[idx]; return n; })} className="text-[8px] font-black text-emerald-400 uppercase hover:text-red-500">Trocar</button></div>
+                                          <div className="flex items-center gap-2 px-3 sm:px-4 py-3 bg-emerald-50 border border-emerald-100 rounded-xl"><Check className="text-emerald-500 shrink-0" size={16} /><p className="text-[10px] font-black text-emerald-700 uppercase flex-1 leading-snug">{selectedProduct?.name}</p><button onClick={() => setMapping(prev => { const n = {...prev}; delete n[idx]; return n; })} className="text-[8px] font-black text-emerald-500 uppercase hover:text-red-500">Trocar</button></div>
                                         ) : (
                                           <div className="flex flex-col sm:flex-row gap-2">
-                                             <select className="flex-1 px-4 py-3 bg-white border border-orange-200 rounded-xl text-[10px] font-black uppercase outline-none" onChange={(e) => { setMapping(prev => ({ ...prev, [idx]: e.target.value })); setMatchConfidences(prev => ({ ...prev, [idx]: 100 })); }}><option value="">Selecionar Artigo Existente...</option>{filteredProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+                                             <select className="flex-1 px-3 sm:px-4 py-3 bg-white border border-orange-200 rounded-xl text-[10px] font-black uppercase outline-none" onChange={(e) => { setMapping(prev => ({ ...prev, [idx]: e.target.value })); setMatchConfidences(prev => ({ ...prev, [idx]: 100 })); }}><option value="">Selecionar Artigo Existente...</option>{filteredProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
                                              <button onClick={async () => {
                                                const created = await onQuickCreateProduct({ name: item.name, category: currentFamily, unit: unitOriginals[idx] || item.unit || 'un' });
                                                setMapping(prev => ({ ...prev, [idx]: created.id }));
@@ -1023,8 +1056,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                                           </div>
                                         )}
                                      </div>
-                                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                       <div className="space-y-1">
+                                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                       <div className="space-y-1 hidden sm:block">
                                          <label className="text-[8px] font-black text-slate-400 uppercase">Unid. Fatura</label>
                                          <input className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase outline-none" value={unitOriginals[idx] || item.unit || 'un'} onChange={(e) => setUnitOriginals(prev => ({ ...prev, [idx]: e.target.value }))} />
                                        </div>
@@ -1044,9 +1077,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                           })}
                        </div>
                     </div>
-                    <div className="pt-8 border-t flex flex-col md:flex-row justify-between items-center gap-6">
-                       <div><p className="text-[10px] font-black text-slate-400 uppercase">Total do Documento</p><p className="text-4xl font-black italic text-slate-900">€ {extractedData.totalInvoiceAmount.toFixed(2)}</p></div>
-                       <button onClick={confirmEntry} className={`w-full md:w-auto px-12 py-5 rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-orange-500'}`} disabled={isDuplicate}>Adicionar ao Stock Central <Check size={20} className="inline ml-2" /></button>
+                    <div className="sticky bottom-0 z-30 -mx-4 -mb-4 sm:mx-0 sm:mb-0 p-4 sm:p-0 bg-white/95 sm:bg-transparent backdrop-blur border-t sm:border-t pt-4 sm:pt-8 flex flex-col md:flex-row justify-between items-center gap-3 sm:gap-6">
+                       <div className="hidden sm:block"><p className="text-[10px] font-black text-slate-400 uppercase">Total do Documento</p><p className="text-4xl font-black italic text-slate-900">€ {extractedData.totalInvoiceAmount.toFixed(2)}</p></div>
+                       <button onClick={confirmEntry} className={`w-full md:w-auto px-8 sm:px-12 py-4 sm:py-5 rounded-2xl sm:rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-orange-500 text-white hover:bg-orange-600 sm:bg-slate-900 sm:hover:bg-orange-500'}`} disabled={isDuplicate}>Confirmar Entrada <Check size={20} className="inline ml-2" /></button>
                     </div>
                  </div>
                </div>
