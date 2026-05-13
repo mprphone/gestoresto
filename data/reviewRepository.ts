@@ -15,6 +15,9 @@ export interface PendingInvoice {
   reviewed_by?: string;
   reviewed_by_name?: string;
   line_count: number;
+  archive_id?: string;
+  archive_mime_type?: string;
+  archive_filename?: string;
 }
 
 export async function listPendingInvoices(): Promise<PendingInvoice[]> {

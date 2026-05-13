@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, Clock, RefreshCcw, FileText, AlertTriangle, Check } from 'lucide-react';
+import { CheckCircle, Clock, RefreshCcw, FileText, AlertTriangle, Check, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { PendingInvoice, listPendingInvoices, markReviewed, markUnreviewed } from '../data/reviewRepository';
+import { apiUrl } from '../data/apiClient';
 import { AppUser } from '../types';
 
 interface InvoiceReviewProps {
@@ -14,6 +15,7 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, onReviewed }
   const [isLoading, setIsLoading] = useState(true);
   const [marking, setMarking] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const load = async () => {
     setIsLoading(true);
@@ -88,23 +90,35 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, onReviewed }
           const isMarking = marking[inv.id];
           const validationOk = !inv.total_validation_status || inv.total_validation_status === 'VALIDO';
 
+          const isExpanded = expandedId === inv.id;
+          const archiveUrl = inv.archive_id
+            ? apiUrl(`/api/archive/file/${inv.archive_id}`)
+            : undefined;
+          const isPdf = inv.archive_mime_type === 'application/pdf';
+
           return (
             <div
               key={inv.id}
               className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden"
             >
               <div className="p-5 flex items-start gap-4">
-                {/* Status icon */}
+                {/* Status icon — click to toggle preview */}
                 <div className="flex-shrink-0 pt-1">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${validationOk ? 'bg-slate-100' : 'bg-orange-50'}`}>
-                    {validationOk
-                      ? <FileText size={18} className="text-slate-500" />
-                      : <AlertTriangle size={18} className="text-orange-500" />}
-                  </div>
+                  <button
+                    onClick={() => setExpandedId(isExpanded ? null : inv.id)}
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${validationOk ? 'bg-slate-100 hover:bg-slate-200' : 'bg-orange-50 hover:bg-orange-100'}`}
+                    title="Ver documento"
+                  >
+                    {isExpanded
+                      ? <ChevronUp size={16} className="text-slate-500" />
+                      : validationOk
+                        ? <FileText size={18} className="text-slate-500" />
+                        : <AlertTriangle size={18} className="text-orange-500" />}
+                  </button>
                 </div>
 
                 {/* Info */}
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : inv.id)}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-black text-slate-900 truncate">{inv.supplier_name || 'Fornecedor'}</p>
@@ -131,6 +145,11 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, onReviewed }
                         Verificar totais
                       </span>
                     )}
+                    {archiveUrl && (
+                      <span className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-slate-50 text-slate-400">
+                        {isPdf ? 'PDF' : 'Foto'} ↗
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -152,6 +171,30 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, onReviewed }
                   </button>
                 </div>
               </div>
+
+              {/* Expandable document preview */}
+              {isExpanded && archiveUrl && (
+                <div className="border-t border-slate-100 bg-slate-50" style={{ height: '70vh' }}>
+                  {isPdf ? (
+                    <iframe
+                      src={archiveUrl}
+                      className="w-full h-full"
+                      title={`Fatura ${inv.doc_number}`}
+                    />
+                  ) : (
+                    <img
+                      src={archiveUrl}
+                      className="w-full h-full object-contain p-4"
+                      alt={`Fatura ${inv.doc_number}`}
+                    />
+                  )}
+                </div>
+              )}
+              {isExpanded && !archiveUrl && (
+                <div className="border-t border-slate-100 bg-slate-50 p-8 text-center text-slate-400 text-sm font-bold">
+                  Sem documento arquivado para esta fatura.
+                </div>
+              )}
             </div>
           );
         })}

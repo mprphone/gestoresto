@@ -354,8 +354,20 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, invoiceLines, p
                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><ImageIcon size={14} /> Arquivo Digital</h4>
                 {detailDocument?.publicUrl || detailInvoice.photoUrl ? (
                   <div className="space-y-4">
-                    <div className="aspect-[3/4] rounded-3xl overflow-hidden border border-slate-200 bg-white">
-                      <img src={detailDocument?.publicUrl || detailInvoice.photoUrl} className="w-full h-full object-contain" />
+                    <div className="rounded-3xl overflow-hidden border border-slate-200 bg-white" style={{ height: '65vh' }}>
+                      {detailDocument?.mimeType === 'application/pdf' ? (
+                        <iframe
+                          src={detailDocument.publicUrl}
+                          className="w-full h-full"
+                          title="Fatura PDF"
+                        />
+                      ) : (
+                        <img
+                          src={detailDocument?.publicUrl || detailInvoice.photoUrl}
+                          className="w-full h-full object-contain"
+                          alt="Fatura"
+                        />
+                      )}
                     </div>
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-2">
                       <p className="text-[10px] font-bold text-slate-500"><span className="font-black uppercase text-slate-400">Storage:</span> {detailDocument?.storageProvider || 'local'}</p>
