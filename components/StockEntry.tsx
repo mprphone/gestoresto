@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Camera, Upload, Check, X, PlusCircle, RefreshCcw, Copy } from 'lucide-react';
 import { processInvoiceImage, InvoiceExtractedData } from '../geminiService';
 import { Product, Category, Supplier, PurchaseInvoice, ProductAlias, StockEntryLineInput } from '../types';
@@ -68,6 +69,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [qrPayloads, setQrPayloads] = useState<string[]>([]);
   const [pageQualities, setPageQualities] = useState<PageQuality[]>([]);
+  const [cameraViewportHeight, setCameraViewportHeight] = useState(720);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -83,6 +85,41 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   useEffect(() => {
     return () => stopCamera();
   }, []);
+
+  useEffect(() => {
+    if (!isCameraOpen) return;
+
+    const stream = cameraStreamRef.current;
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(() => undefined);
+    }
+  }, [isCameraOpen]);
+
+  useEffect(() => {
+    if (!isCameraOpen) return;
+
+    const updateViewportHeight = () => {
+      setCameraViewportHeight(Math.round(window.visualViewport?.height || window.innerHeight || 720));
+    };
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+
+    updateViewportHeight();
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    window.addEventListener('resize', updateViewportHeight);
+    window.visualViewport?.addEventListener('resize', updateViewportHeight);
+    window.visualViewport?.addEventListener('scroll', updateViewportHeight);
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      window.removeEventListener('resize', updateViewportHeight);
+      window.visualViewport?.removeEventListener('resize', updateViewportHeight);
+      window.visualViewport?.removeEventListener('scroll', updateViewportHeight);
+    };
+  }, [isCameraOpen]);
 
   const stopCamera = () => {
     cameraStreamRef.current?.getTracks().forEach(track => track.stop());
@@ -111,12 +148,6 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       });
       cameraStreamRef.current = stream;
       setIsCameraOpen(true);
-      requestAnimationFrame(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(() => undefined);
-        }
-      });
     } catch (error) {
       setCameraError('Não consegui abrir a câmara. Confirme as permissões do browser e se está em HTTPS ou localhost.');
     }
@@ -481,6 +512,57 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     }
   };
 
+  const cameraOverlay = isCameraOpen ? (
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100vw',
+        height: `${cameraViewportHeight}px`,
+        zIndex: 2147483647,
+        background: '#020617',
+        overflow: 'hidden',
+        touchAction: 'none',
+        transform: 'translateZ(0)',
+        WebkitTransform: 'translateZ(0)'
+      }}
+    >
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          background: '#000'
+        }}
+      />
+      <div className="absolute top-0 left-0 right-0 z-10 p-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between text-white bg-gradient-to-b from-black/75 to-transparent">
+        <div>
+          <h4 className="font-black uppercase text-sm">Câmara</h4>
+          <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Enquadre a fatura e fotografe</p>
+        </div>
+        <button onClick={closeCamera} className="p-3 bg-white/10 hover:bg-white/20 rounded-full transition-colors">
+          <X size={20} />
+        </button>
+      </div>
+      {cameraError && <p className="absolute left-4 right-4 bottom-28 z-10 p-3 rounded-2xl bg-red-500/90 text-xs font-bold text-white">{cameraError}</p>}
+      <div className="absolute left-0 right-0 bottom-0 z-10 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex gap-3 justify-end bg-gradient-to-t from-black/80 to-transparent">
+        <button onClick={closeCamera} className="px-5 py-4 rounded-2xl border border-white/10 text-white/80 font-black uppercase text-xs hover:text-white hover:bg-white/10 transition-all">Cancelar</button>
+        <button onClick={captureCameraPage} className="flex-1 sm:flex-none px-8 py-4 rounded-2xl bg-orange-500 text-white font-black uppercase text-xs hover:bg-orange-600 transition-all flex items-center justify-center gap-2 shadow-2xl">
+          <Camera size={18} /> Fotografar
+        </button>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-20">
       <input type="file" accept="image/*" multiple className="hidden" ref={fileInputRef} onChange={(e) => handleFiles(e.target.files)} />
@@ -634,31 +716,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         </div>
       )}
 
-      {isCameraOpen && (
-        <div className="fixed inset-0 z-[120] bg-slate-950 flex items-stretch justify-center">
-          <div className="relative w-screen h-[100dvh] bg-black overflow-hidden flex flex-col">
-            <div className="absolute top-0 left-0 right-0 z-10 p-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between text-white bg-gradient-to-b from-black/75 to-transparent">
-              <div>
-                <h4 className="font-black uppercase text-sm">Câmara</h4>
-                <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Enquadre a fatura e fotografe</p>
-              </div>
-              <button onClick={closeCamera} className="p-3 bg-white/10 hover:bg-white/20 rounded-full transition-colors">
-                <X size={20} />
-              </button>
-            </div>
-            <div className="bg-black flex-1 min-h-0">
-              <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-            </div>
-            {cameraError && <p className="absolute left-4 right-4 bottom-28 z-10 p-3 rounded-2xl bg-red-500/90 text-xs font-bold text-white">{cameraError}</p>}
-            <div className="absolute left-0 right-0 bottom-0 z-10 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex gap-3 justify-end bg-gradient-to-t from-black/80 to-transparent">
-              <button onClick={closeCamera} className="px-5 py-4 rounded-2xl border border-white/10 text-white/80 font-black uppercase text-xs hover:text-white hover:bg-white/10 transition-all">Cancelar</button>
-              <button onClick={captureCameraPage} className="flex-1 sm:flex-none px-8 py-4 rounded-2xl bg-orange-500 text-white font-black uppercase text-xs hover:bg-orange-600 transition-all flex items-center justify-center gap-2 shadow-2xl">
-                <Camera size={18} /> Fotografar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {cameraOverlay && createPortal(cameraOverlay, document.body)}
     </div>
   );
 };
