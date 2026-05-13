@@ -22,6 +22,8 @@ const normalizeText = (value: string) =>
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 
+const normalizeNif = (value: string) => String(value || '').replace(/\D/g, '');
+
 const moneyCents = (value?: number | null) => {
   if (value === undefined || value === null || !Number.isFinite(Number(value))) return null;
   return Math.round(Number(value) * 100);
@@ -313,7 +315,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
       setExtractedData(validation.data);
       setSupplier(validation.data.supplierName || '');
-      setNif(validation.data.supplierNif || '');
+      setNif(normalizeNif(validation.data.supplierNif || ''));
       setDocNumber(validation.data.invoiceNumber || '');
       
       const autoMap: Record<number, string> = {};
@@ -327,7 +329,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         if (existingCat) family = existingCat;
         initialFamilies[idx] = family;
 
-        const currentSupplier = suppliers.find(s => s.nif === data.supplierNif);
+        const currentSupplier = suppliers.find(s => normalizeNif(s.nif) === normalizeNif(data.supplierNif || ''));
         const aliasMatch = currentSupplier
           ? productAliases.find(alias =>
               alias.supplierId === currentSupplier.id &&

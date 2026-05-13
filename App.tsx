@@ -171,7 +171,8 @@ const App: React.FC = () => {
   };
 
   const handleStockEntry = async (items: StockEntryLineInput[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any) => {
-    const isDup = invoices.some(inv => inv.docNumber === invoiceData.docNumber && inv.supplierNif === supplierData.nif);
+    const supplierNif = String(supplierData?.nif || '').replace(/\D/g, '');
+    const isDup = invoices.some(inv => inv.docNumber === invoiceData.docNumber && inv.supplierNif.replace(/\D/g, '') === supplierNif);
     if (isDup) {
       alert("Aviso: Esta fatura já foi registada anteriormente!");
       return;
@@ -181,7 +182,7 @@ const App: React.FC = () => {
     if (photoUrl) {
       archiveDocument = await uploadArchiveDocument({
         dataUrl: photoUrl,
-        filename: `${supplierData?.nif || 'sem-nif'}-${invoiceData?.docNumber || 'sn'}.jpg`,
+        filename: `${supplierNif || 'sem-nif'}-${invoiceData?.docNumber || 'sn'}.jpg`,
         documentType: ArchiveDocumentType.INVOICE,
         qualityOk: invoiceData?.digitalCompliance?.imageQualityOk,
         hasQrCode: invoiceData?.digitalCompliance?.hasQrCode,
@@ -214,7 +215,7 @@ const App: React.FC = () => {
     await runAction(async () => {
       await createInvoiceWithLines({
       supplierName: supplierData?.name || 'Fornecedor',
-      supplierNif: supplierData?.nif || '',
+      supplierNif,
       supplierEmail: supplierData?.email,
       supplierPhone: supplierData?.phone,
       customerName: invoiceData?.customerName,

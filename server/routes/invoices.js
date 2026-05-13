@@ -178,17 +178,19 @@ invoicesRouter.post('/', async (req, res, next) => {
       await assertNotDuplicateInvoice(client, payload);
       let supplierId = payload.supplierId || null;
       if (!supplierId && payload.supplierNif) {
+        const normalizedSupplierNif = onlyDigits(payload.supplierNif);
         const supplier = await client.query(`
           insert into suppliers (name, nif, email, phone, payment_terms_days)
           values ($1, $2, $3, $4, coalesce($5, 30))
-          on conflict (nif) do update set
+          on conflict (normalized_nif) where normalized_nif <> '' do update set
             name = excluded.name,
+            nif = excluded.nif,
             email = coalesce(excluded.email, suppliers.email),
             phone = coalesce(excluded.phone, suppliers.phone)
           returning *
         `, [
           payload.supplierName || 'Fornecedor',
-          payload.supplierNif,
+          normalizedSupplierNif,
           payload.supplierEmail || null,
           payload.supplierPhone || null,
           payload.paymentTermsDays || 30
@@ -218,7 +220,7 @@ invoicesRouter.post('/', async (req, res, next) => {
         on conflict (supplier_nif, doc_number) do nothing
         returning *
       `, [
-        supplierId, payload.supplierName, payload.supplierNif,
+        supplierId, payload.supplierName, onlyDigits(payload.supplierNif),
         restaurantValidation.customerName, restaurantValidation.customerNif, restaurantValidation.profileId,
         restaurantValidation.status, restaurantValidation.notes,
         payload.docNumber, payload.totalAmount,

@@ -64,6 +64,7 @@ create table if not exists suppliers (
   name text not null,
   normalized_name text generated always as (normalize_search_text(name)) stored,
   nif text not null,
+  normalized_nif text generated always as (regexp_replace(coalesce(nif, ''), '\D', '', 'g')) stored,
   email text,
   phone text,
   payment_terms_days integer not null default 30 check (payment_terms_days >= 0),
@@ -71,7 +72,13 @@ create table if not exists suppliers (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table suppliers
+  add column if not exists normalized_nif text generated always as (regexp_replace(coalesce(nif, ''), '\D', '', 'g')) stored;
+
 create unique index if not exists suppliers_nif_unique on suppliers (nif);
+create unique index if not exists suppliers_normalized_nif_unique
+  on suppliers (normalized_nif)
+  where normalized_nif <> '';
 create index if not exists suppliers_name_trgm_idx on suppliers using gin (normalized_name gin_trgm_ops);
 
 drop trigger if exists suppliers_touch_updated_at on suppliers;
