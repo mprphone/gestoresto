@@ -14,11 +14,12 @@ import { paymentsRouter } from './routes/payments.js';
 import { reportsRouter } from './routes/reports.js';
 import { emailsRouter } from './routes/emails.js';
 import { restaurantProfileRouter } from './routes/restaurantProfile.js';
+import { geminiRouter } from './routes/gemini.js';
 
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '25mb' }));
 
 app.get('/', (_req, res) => {
   res.type('html').send(`
@@ -69,6 +70,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/emails', emailsRouter);
 app.use('/api/restaurant-profile', restaurantProfileRouter);
+app.use('/api/gemini', geminiRouter);
 
 app.use((error, _req, res, _next) => {
   console.error(error);

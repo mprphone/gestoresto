@@ -5,6 +5,8 @@ dotenv.config();
 
 export const config = {
   port: Number(process.env.API_PORT || 8790),
+  geminiApiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || '',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-05-20',
   databaseUrl: process.env.DATABASE_URL || '',
   databaseName: process.env.PGDATABASE || 'gestoresto',
   databaseUser: process.env.PGUSER || process.env.USER || 'ubuntu',
