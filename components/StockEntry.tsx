@@ -528,7 +528,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       setMapping(autoMap);
       setItemFamilies(initialFamilies);
     } catch (error) {
-      setProcessingError('Não foi possível analisar a fotografia. Verifique a ligação à internet e a chave Gemini.');
+      const message = error instanceof Error ? error.message : '';
+      setProcessingError(message || 'Não foi possível analisar a fotografia. Verifique a ligação à internet e a chave Gemini.');
     } finally {
       setIsProcessing(false);
     }

@@ -10,6 +10,9 @@ geminiRouter.post('/analyze-invoice', async (req, res, next) => {
     if (!Array.isArray(images) || images.length === 0) {
       return res.status(400).json({ error: 'images array required' });
     }
+    if (!config.geminiApiKey || config.geminiApiKey === 'PLACEHOLDER_API_KEY') {
+      return res.status(500).json({ error: 'Chave Gemini não configurada no servidor. Defina GEMINI_API_KEY em .env.local e reinicie a API.' });
+    }
 
     const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
