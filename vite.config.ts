@@ -16,7 +16,10 @@ export default defineConfig(({ mode }) => {
         }
       },
       plugins: [react()],
-      define: {},
+      define: {
+        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+        'process.env.GEMINI_MODEL': JSON.stringify(env.GEMINI_MODEL || 'gemini-2.5-flash-preview-05-20')
+      },
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
