@@ -278,9 +278,32 @@ invoicesRouter.get('/:id/lines', async (req, res, next) => {
   }
 });
 
+// Detects credit/debit notes by doc number prefix (NC, ND, NA) or negative total
+function isCreditNote(payload) {
+  const doc = String(payload.docNumber || '').trim().toUpperCase();
+  return doc.startsWith('NC') || doc.startsWith('ND') || doc.startsWith('NA') ||
+    Number(payload.totalAmount || 0) < 0;
+}
+
 invoicesRouter.post('/', async (req, res, next) => {
   try {
     const payload = req.body;
+    const isCredit = isCreditNote(payload);
+    // For credit notes, negate quantities and total so stock is reduced
+    if (isCredit) {
+      payload.totalAmount = -Math.abs(Number(payload.totalAmount || 0));
+      // Clear QR total so validation doesn't mismatch with negated invoice total
+      payload.qrTotalAmount = undefined;
+      payload.totalValidationStatus = 'NAO_VERIFICADO';
+      if (Array.isArray(payload.lines)) {
+        payload.lines = payload.lines.map(line => ({
+          ...line,
+          quantityOriginal: -Math.abs(Number(line.quantityOriginal || 0)),
+          quantityStock: -Math.abs(Number(line.quantityStock || 0)),
+          totalPrice: -Math.abs(Number(line.totalPrice || 0))
+        }));
+      }
+    }
     const saved = await withTransaction(async client => {
       const restaurantValidation = await validateRestaurantCustomer(client, payload);
       const totalValidation = validateInvoiceTotals(payload);
@@ -533,7 +556,9 @@ invoicesRouter.post('/', async (req, res, next) => {
           line.unitPrice,
           supplierId,
           payload.supplierName,
-          `Entrada via Fatura ${payload.docNumber || ''}`
+          isCredit
+            ? `Nota de Crédito ${payload.docNumber || ''}`
+            : `Entrada via Fatura ${payload.docNumber || ''}`
         ]);
       }
 

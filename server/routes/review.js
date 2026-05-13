@@ -28,7 +28,7 @@ reviewRouter.get('/pending', async (_req, res, next) => {
 });
 
 // Mark invoice as reviewed
-reviewRouter.patch('/:id/reviewed', async (req, res, next) => {
+reviewRouter.post('/:id/reviewed', async (req, res, next) => {
   try {
     const { userId } = req.body;
     const result = await query(`
@@ -46,7 +46,7 @@ reviewRouter.patch('/:id/reviewed', async (req, res, next) => {
 });
 
 // Mark invoice as unreviewed (undo)
-reviewRouter.patch('/:id/unreviewed', async (req, res, next) => {
+reviewRouter.post('/:id/unreviewed', async (req, res, next) => {
   try {
     await query(
       'update purchase_invoices set reviewed_at = null, reviewed_by = null where id = $1',
