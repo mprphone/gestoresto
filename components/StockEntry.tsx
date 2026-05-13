@@ -49,6 +49,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [itemFamilies, setItemFamilies] = useState<Record<number, Category>>({});
   const [unitOriginals, setUnitOriginals] = useState<Record<number, string>>({});
   const [conversionFactors, setConversionFactors] = useState<Record<number, number>>({});
+  const [autoCreatedProducts, setAutoCreatedProducts] = useState<Record<string, Product>>({});
   const [supplier, setSupplier] = useState('');
   const [nif, setNif] = useState('');
   const [docNumber, setDocNumber] = useState('');
@@ -230,9 +231,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       setDocNumber(validation.data.invoiceNumber || '');
       
       const autoMap: Record<number, string> = {};
+      const createdProducts: Record<string, Product> = {};
       const initialFamilies: Record<number, Category> = {};
 
-      validation.data.items.forEach((item, idx) => {
+      for (const [idx, item] of validation.data.items.entries()) {
         let family = 'Outros';
         const catLower = (item.category || '').toLowerCase();
         const existingCat = categories.find(c => catLower.includes(c.toLowerCase()) || c.toLowerCase().includes(catLower));
@@ -248,7 +250,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           : undefined;
         const match = aliasMatch
           ? products.find(p => p.id === aliasMatch.productId)
-          : products.find(p => normalizeText(p.name || '') === normalizeText(item.name || ''));
+          : products.find(p => normalizeText(p.name || '') === normalizeText(item.name || '')) ||
+            Object.values(createdProducts).find(p => normalizeText(p.name || '') === normalizeText(item.name || ''));
 
         if (match) {
           autoMap[idx] = match.id;
@@ -257,10 +260,21 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
             setAliasMapping(prev => ({ ...prev, [idx]: aliasMatch.id }));
             setConversionFactors(prev => ({ ...prev, [idx]: aliasMatch.conversionFactor || 1 }));
           }
+        } else {
+          const created = await onQuickCreateProduct({
+            name: item.name || 'Artigo sem nome',
+            category: family,
+            unit: item.unit || 'un',
+            minStock: 0
+          });
+          autoMap[idx] = created.id;
+          createdProducts[created.id] = created;
+          initialFamilies[idx] = created.category;
         }
         setUnitOriginals(prev => ({ ...prev, [idx]: item.unit || match?.unit || 'un' }));
         setConversionFactors(prev => ({ ...prev, [idx]: prev[idx] || 1 }));
-      });
+      }
+      setAutoCreatedProducts(prev => ({ ...prev, ...createdProducts }));
       setMapping(autoMap);
       setItemFamilies(initialFamilies);
     } catch (error) {
@@ -323,14 +337,30 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     await processAllPages(updated, updatedQrPayloads);
   };
 
-  const confirmEntry = () => {
+  const confirmEntry = async () => {
     if (extractedData && !isDuplicate) {
+      const completeMapping = { ...mapping };
+      const createdProducts = { ...autoCreatedProducts };
+      for (const [idx, item] of extractedData.items.entries()) {
+        if (completeMapping[idx]) continue;
+        const created = await onQuickCreateProduct({
+          name: item.name || 'Artigo sem nome',
+          category: itemFamilies[idx] || item.category || 'Outros',
+          unit: unitOriginals[idx] || item.unit || 'un',
+          minStock: 0
+        });
+        completeMapping[idx] = created.id;
+        createdProducts[created.id] = created;
+      }
+      setMapping(completeMapping);
+      setAutoCreatedProducts(createdProducts);
+
       const itemsToSubmit: StockEntryLineInput[] = extractedData.items.map((item, idx) => {
-        const product = products.find(p => p.id === mapping[idx]);
+        const product = products.find(p => p.id === completeMapping[idx]) || createdProducts[completeMapping[idx]];
         const factor = conversionFactors[idx] || 1;
         return {
           ...item,
-          productId: mapping[idx],
+          productId: completeMapping[idx],
           aliasId: aliasMapping[idx],
           officialName: product?.name || item.name,
           supplierItemCode: item.supplierItemCode,
@@ -407,13 +437,13 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                        <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nº Fatura</label><input type="text" className={`w-full px-5 py-3 border rounded-xl font-bold text-xs ${isDuplicate ? 'bg-red-50 border-red-500 text-red-600' : 'bg-slate-50 border-slate-200'}`} value={docNumber} onChange={(e) => setDocNumber(e.target.value)} /></div>
                     </div>
                     <div className="space-y-4">
-                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-4">Conferência Separada: Família e Artigo</h5>
+                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-4">Conferência opcional: Família e Artigo</h5>
                        <div className="space-y-6">
                           {extractedData.items.map((item, idx) => {
                             const isMapped = !!mapping[idx];
                             const currentFamily = itemFamilies[idx] || 'Outros';
                             const filteredProducts = products.filter(p => p.category === currentFamily);
-                            const selectedProduct = products.find(p => p.id === mapping[idx]);
+                            const selectedProduct = products.find(p => p.id === mapping[idx]) || autoCreatedProducts[mapping[idx]];
                             const factor = conversionFactors[idx] || 1;
                             const stockQty = item.quantity * factor;
                             return (
@@ -458,7 +488,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                     </div>
                     <div className="pt-8 border-t flex flex-col md:flex-row justify-between items-center gap-6">
                        <div><p className="text-[10px] font-black text-slate-400 uppercase">Total do Documento</p><p className="text-4xl font-black italic text-slate-900">€ {extractedData.totalInvoiceAmount.toFixed(2)}</p></div>
-                       <button onClick={confirmEntry} className={`w-full md:w-auto px-12 py-5 rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate || Object.keys(mapping).length < extractedData.items.length ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-orange-500'}`} disabled={Object.keys(mapping).length < extractedData.items.length || isDuplicate}>Adicionar ao Stock Central <Check size={20} className="inline ml-2" /></button>
+                       <button onClick={confirmEntry} className={`w-full md:w-auto px-12 py-5 rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-orange-500'}`} disabled={isDuplicate}>Adicionar ao Stock Central <Check size={20} className="inline ml-2" /></button>
                     </div>
                  </div>
                </div>
