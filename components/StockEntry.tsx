@@ -33,11 +33,11 @@ const moneyCents = (value?: number | null) => {
 const formatMoney = (cents: number) => (cents / 100).toFixed(2).replace('.', ',');
 
 const parsePortugueseQrTotal = (text: string) => {
-  const totalField = text.split('*').find(part => part.startsWith('O:'));
+  const totalField = text.match(/(?:^|\*)O:([^*]+)/);
   if (!totalField) return undefined;
-  const value = totalField.slice(2).replace(',', '.');
+  const value = totalField[1].trim().replace(',', '.');
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 };
 
 const hasVatOnLines = (items: InvoiceExtractedData['items']) =>
@@ -395,8 +395,12 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const validateTotals = (data: InvoiceExtractedData, detectedQrPayloads: string[]) => {
     const linesTotal = data.items.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0);
     const calculatedLinesTotal = Number.isFinite(Number(data.calculatedLinesTotal)) ? Number(data.calculatedLinesTotal) : linesTotal;
-    const qrText = detectedQrPayloads[0] || data.qrCodeText;
-    const qrTotal = qrText ? parsePortugueseQrTotal(qrText) : data.qrTotalAmount;
+    const detectedQrText = detectedQrPayloads.find(payload => parsePortugueseQrTotal(payload) !== undefined);
+    const qrText = detectedQrText || data.qrCodeText || detectedQrPayloads[0];
+    const parsedDetectedQrTotal = detectedQrText ? parsePortugueseQrTotal(detectedQrText) : undefined;
+    const parsedGeminiQrTotal = data.qrCodeText ? parsePortugueseQrTotal(data.qrCodeText) : undefined;
+    const geminiQrTotal = Number(data.qrTotalAmount || 0) > 0 ? data.qrTotalAmount : undefined;
+    const qrTotal = parsedDetectedQrTotal ?? parsedGeminiQrTotal ?? geminiQrTotal;
     const invoiceTotalCents = moneyCents(data.totalInvoiceAmount);
     const linesTotalCents = moneyCents(calculatedLinesTotal);
     const qrTotalCents = moneyCents(qrTotal);
