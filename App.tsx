@@ -173,7 +173,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleStockEntry = async (items: StockEntryLineInput[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any) => {
+  const handleStockEntry = async (items: StockEntryLineInput[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any, photoUrls?: string[]) => {
     const supplierNif = String(supplierData?.nif || '').replace(/\D/g, '');
     const isDup = invoices.some(inv => inv.docNumber === invoiceData.docNumber && inv.supplierNif.replace(/\D/g, '') === supplierNif);
     if (isDup) {
@@ -182,17 +182,23 @@ const App: React.FC = () => {
     }
 
     let archiveDocument: DigitalArchiveDocument | undefined;
-    if (photoUrl) {
-      archiveDocument = await uploadArchiveDocument({
-        dataUrl: photoUrl,
-        filename: `${supplierNif || 'sem-nif'}-${invoiceData?.docNumber || 'sn'}.jpg`,
-        documentType: ArchiveDocumentType.INVOICE,
-        qualityOk: invoiceData?.digitalCompliance?.imageQualityOk,
-        hasQrCode: invoiceData?.digitalCompliance?.hasQrCode,
-        hasAtcud: invoiceData?.digitalCompliance?.hasAtcud,
-        atcud: invoiceData?.digitalCompliance?.atcud,
-        notes: invoiceData?.digitalCompliance?.complianceNotes
-      });
+    const invoicePhotos = photoUrls?.length ? photoUrls : (photoUrl ? [photoUrl] : []);
+    const archiveDocuments: DigitalArchiveDocument[] = [];
+    if (invoicePhotos.length > 0) {
+      for (const [index, dataUrl] of invoicePhotos.entries()) {
+        const savedDocument = await uploadArchiveDocument({
+          dataUrl,
+          filename: `${supplierNif || 'sem-nif'}-${invoiceData?.docNumber || 'sn'}-pag-${index + 1}.jpg`,
+          documentType: ArchiveDocumentType.INVOICE,
+          qualityOk: invoiceData?.digitalCompliance?.imageQualityOk,
+          hasQrCode: invoiceData?.digitalCompliance?.hasQrCode,
+          hasAtcud: invoiceData?.digitalCompliance?.hasAtcud,
+          atcud: invoiceData?.digitalCompliance?.atcud,
+          notes: invoiceData?.digitalCompliance?.complianceNotes
+        });
+        archiveDocuments.push(savedDocument);
+      }
+      archiveDocument = archiveDocuments[0];
     }
 
     const lines = items.map((item, idx) => {
@@ -229,6 +235,7 @@ const App: React.FC = () => {
       status: InvoiceStatus.PENDING,
       paidAmount: 0,
       archiveDocumentId: archiveDocument?.id,
+      archiveDocumentIds: archiveDocuments.map(doc => doc.id),
       hasQrCode: invoiceData?.digitalCompliance?.hasQrCode,
       hasAtcud: invoiceData?.digitalCompliance?.hasAtcud,
       atcud: invoiceData?.digitalCompliance?.atcud,

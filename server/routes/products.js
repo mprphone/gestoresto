@@ -30,6 +30,20 @@ productsRouter.get('/', async (req, res, next) => {
 productsRouter.post('/', async (req, res, next) => {
   try {
     const product = req.body;
+    const existing = await query(`
+      select *
+      from products
+      where normalized_name = normalize_search_text($1)
+        and unit = $2
+        and ($3::uuid is null or id <> $3::uuid)
+        and is_active = true
+      limit 1
+    `, [product.name, product.unit, product.id || null]);
+    if (existing.rows[0]) {
+      res.status(200).json(existing.rows[0]);
+      return;
+    }
+
     const result = await query(`
       insert into products (id, name, category, unit, current_stock, average_price, min_stock)
       values (coalesce($1, gen_random_uuid()), $2, $3, $4, coalesce($5, 0), coalesce($6, 0), coalesce($7, 0))

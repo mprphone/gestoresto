@@ -12,7 +12,7 @@ interface StockEntryProps {
   invoices: PurchaseInvoice[];
   productAliases: ProductAlias[];
   categories: Category[];
-  onComplete: (items: StockEntryLineInput[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any) => void;
+  onComplete: (items: StockEntryLineInput[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any, photoUrls?: string[]) => void;
   onQuickCreateProduct: (data: any) => Product | Promise<Product>;
 }
 
@@ -439,7 +439,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     const parsedGeminiQrTotal = data.qrCodeText ? parsePortugueseQrTotal(data.qrCodeText) : undefined;
     const geminiQrTotal = Number(data.qrTotalAmount || 0) > 0 ? data.qrTotalAmount : undefined;
     const qrTotal = parsedDetectedQrTotal ?? parsedGeminiQrTotal ?? geminiQrTotal;
-    const invoiceTotalCents = moneyCents(data.totalInvoiceAmount);
+    const extractedInvoiceTotal = Number(data.totalInvoiceAmount || 0) > 0 ? Number(data.totalInvoiceAmount) : undefined;
+    const inferredInvoiceTotal = extractedInvoiceTotal ?? qrTotal ?? (calculatedLinesTotal > 0 ? calculatedLinesTotal : undefined);
+    const invoiceTotalCents = moneyCents(inferredInvoiceTotal);
     const linesTotalCents = moneyCents(calculatedLinesTotal);
     const qrTotalCents = moneyCents(qrTotal);
     const lineTotalsLikelyIncludeVat = hasVatOnLines(data.items) && data.items.some(item => {
@@ -465,6 +467,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     return {
       data: {
         ...data,
+        totalInvoiceAmount: inferredInvoiceTotal ?? 0,
         qrCodeText: qrText,
         qrTotalAmount: qrTotal,
         calculatedLinesTotal,
@@ -696,7 +699,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           vatRate: item.vatRate
         };
       });
-      onComplete(itemsToSubmit, `data:image/jpeg;base64,${pages[0]}`, { name: supplier, nif }, {
+      const invoicePhotos = pages.map(page => `data:image/jpeg;base64,${page}`);
+      onComplete(itemsToSubmit, invoicePhotos[0], { name: supplier, nif }, {
         docNumber,
         totalAmount: extractedData.totalInvoiceAmount,
         customerName: extractedData.customerName,
@@ -707,7 +711,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         totalValidationStatus: extractedData.digitalCompliance.totalValidationStatus,
         totalValidationNotes: extractedData.digitalCompliance.totalValidationNotes,
         digitalCompliance: extractedData.digitalCompliance
-      });
+      }, invoicePhotos);
     }
   };
 

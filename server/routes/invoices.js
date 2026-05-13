@@ -239,21 +239,26 @@ invoicesRouter.post('/', async (req, res, next) => {
 
       const invoiceId = invoice.rows[0].id;
       let archiveDocument = null;
-      if (payload.archiveDocumentId) {
+      const archiveDocumentIds = Array.isArray(payload.archiveDocumentIds) && payload.archiveDocumentIds.length > 0
+        ? payload.archiveDocumentIds
+        : (payload.archiveDocumentId ? [payload.archiveDocumentId] : []);
+      const archiveDocuments = [];
+      for (const archiveDocumentId of archiveDocumentIds) {
         const archive = await client.query(`
           update digital_archive_documents
           set invoice_id = $1, supplier_id = coalesce($2, supplier_id)
           where id = $3
           returning *
-        `, [invoiceId, supplierId, payload.archiveDocumentId]);
-        archiveDocument = archive.rows[0] || null;
-        if (archiveDocument) {
+        `, [invoiceId, supplierId, archiveDocumentId]);
+        if (archive.rows[0]) archiveDocuments.push(archive.rows[0]);
+      }
+      archiveDocument = archiveDocuments[0] || null;
+      if (archiveDocument) {
           await client.query(`
             update purchase_invoices
             set primary_archive_document_id = $1, photo_url = coalesce($2, photo_url)
             where id = $3
           `, [archiveDocument.id, archiveDocument.public_url, invoiceId]);
-        }
       }
 
       const lines = [];
@@ -354,11 +359,13 @@ invoicesRouter.post('/', async (req, res, next) => {
 
       await audit(client, req, 'create', 'purchase_invoices', invoiceId, null, { ...invoice.rows[0], lines });
       if (config.invoiceOkEmailTo) {
-        const invoiceAttachment = archiveDocument?.storage_path ? [{
-          filename: archiveDocument.original_filename || `fatura-${payload.docNumber || invoiceId}.jpg`,
-          path: archiveDocument.storage_path,
-          contentType: archiveDocument.mime_type || undefined
-        }] : [];
+        const invoiceAttachments = archiveDocuments
+          .filter(doc => doc.storage_path)
+          .map((doc, index) => ({
+            filename: doc.original_filename || `fatura-${payload.docNumber || invoiceId}-pag-${index + 1}.jpg`,
+            path: doc.storage_path,
+            contentType: doc.mime_type || undefined
+          }));
         await sendTrackedEmail(client, req, {
           recipient: config.invoiceOkEmailTo,
           subject: `Fatura registada: ${payload.docNumber || 'S/N'} - ${payload.supplierName || 'Fornecedor'}`,
@@ -374,7 +381,7 @@ invoicesRouter.post('/', async (req, res, next) => {
             '',
             'Estado: fatura guardada com sucesso.'
           ].join('\n'),
-          attachments: invoiceAttachment,
+          attachments: invoiceAttachments,
           relatedEntityTable: 'purchase_invoices',
           relatedEntityId: invoiceId
         });
