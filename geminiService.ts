@@ -32,24 +32,11 @@ export interface InvoiceExtractedData {
   };
 }
 
-// Calls the local Node.js server which holds the API key securely.
-// The server proxies the request to Google Gemini — the key never
-// reaches the browser bundle.
+import { apiPost } from './data/apiClient';
+
 export const processInvoiceImage = async (base64Images: string[]): Promise<InvoiceExtractedData | null> => {
   try {
-    const response = await fetch('/api/gemini/analyze-invoice', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ images: base64Images })
-    });
-
-    if (!response.ok) {
-      const err = await response.text().catch(() => response.statusText);
-      console.error('Gemini server error:', response.status, err);
-      return null;
-    }
-
-    return await response.json() as InvoiceExtractedData;
+    return await apiPost<InvoiceExtractedData>('/api/gemini/analyze-invoice', { images: base64Images });
   } catch (error) {
     console.error('Erro no processamento IA:', error);
     return null;
