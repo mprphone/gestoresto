@@ -37,6 +37,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [isDuplicate, setIsDuplicate] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [processingError, setProcessingError] = useState<string | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -100,12 +101,13 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     return new Promise((resolve) => {
       const img = new Image();
       img.src = base64;
+      img.onerror = () => resolve(base64.split(',')[1] || base64);
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const MAX_WIDTH = 1200;
-        const scale = MAX_WIDTH / img.width;
-        canvas.width = MAX_WIDTH;
-        canvas.height = img.height * scale;
+        const scale = Math.min(1, MAX_WIDTH / img.width);
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
         resolve(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
@@ -115,8 +117,14 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
   const processAllPages = async (currentPages: string[]) => {
     setIsProcessing(true);
-    const data = await processInvoiceImage(currentPages);
-    if (data) {
+    setProcessingError(null);
+    try {
+      const data = await processInvoiceImage(currentPages);
+      if (!data || data.items.length === 0) {
+        setProcessingError('A IA não conseguiu ler artigos nesta fotografia. Tente uma foto mais próxima, nítida e com a fatura completa.');
+        return;
+      }
+
       setExtractedData(data);
       setSupplier(data.supplierName || '');
       setNif(data.supplierNif || '');
@@ -156,23 +164,35 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       });
       setMapping(autoMap);
       setItemFamilies(initialFamilies);
+    } catch (error) {
+      setProcessingError('Não foi possível analisar a fotografia. Verifique a ligação à internet e a chave Gemini.');
+    } finally {
+      setIsProcessing(false);
     }
-    setIsProcessing(false);
   };
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setIsProcessing(true);
-    const newPages: string[] = [];
-    for (let i = 0; i < files.length; i++) {
-      const reader = new FileReader();
-      const p = new Promise<string>(r => { reader.onload = () => r(reader.result as string); });
-      reader.readAsDataURL(files[i]);
-      newPages.push(await compressImage(await p));
+    setProcessingError(null);
+    try {
+      const newPages: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const reader = new FileReader();
+        const p = new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('Falha ao ler imagem'));
+        });
+        reader.readAsDataURL(files[i]);
+        newPages.push(await compressImage(await p));
+      }
+      const updated = [...pages, ...newPages];
+      setPages(updated);
+      await processAllPages(updated);
+    } catch (error) {
+      setProcessingError('Não consegui abrir essa fotografia. Tente outro ficheiro ou tire uma nova foto.');
+      setIsProcessing(false);
     }
-    const updated = [...pages, ...newPages];
-    setPages(updated);
-    await processAllPages(updated);
   };
 
   const captureCameraPage = async () => {
@@ -252,7 +272,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                    {pages.map((p, idx) => (
                      <div key={idx} className="relative group aspect-[3/4] rounded-2xl overflow-hidden border border-slate-200">
                         <img src={`data:image/jpeg;base64,${p}`} className="w-full h-full object-cover" />
-                        <button onClick={() => setPages(prev => prev.filter((_, i) => i !== idx))} className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"><X size={14} /></button>
+                        <button onClick={() => {
+                          setPages(prev => prev.filter((_, i) => i !== idx));
+                          setProcessingError(null);
+                        }} className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"><X size={14} /></button>
                      </div>
                    ))}
                    <button onClick={openCamera} className="aspect-[3/4] rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-300 hover:border-orange-500 transition-all"><PlusCircle size={24} /><span className="text-[8px] font-black uppercase mt-1">Add Pág.</span></button>
@@ -328,7 +351,34 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                     </div>
                  </div>
                </div>
-             ) : <div className="h-full flex flex-col items-center justify-center text-slate-300 py-32 space-y-6"><RefreshCcw className={`animate-spin ${isProcessing ? 'text-orange-500' : 'opacity-0'}`} size={48} /><p className="font-black text-[10px] uppercase">IA Analisando Documento...</p></div>}
+             ) : (
+               <div className="h-full flex flex-col items-center justify-center text-slate-300 py-32 space-y-6 text-center">
+                 {isProcessing ? (
+                   <>
+                     <RefreshCcw className="animate-spin text-orange-500" size={48} />
+                     <p className="font-black text-[10px] uppercase">IA Analisando Documento...</p>
+                   </>
+                 ) : (
+                   <>
+                     <div className="p-5 bg-red-50 rounded-3xl border border-red-100">
+                       <X className="text-red-500" size={36} />
+                     </div>
+                     <div className="max-w-md">
+                       <p className="font-black text-sm text-slate-800 uppercase">Não consegui ler a fatura</p>
+                       <p className="text-xs font-bold text-slate-400 mt-2">{processingError || 'A análise terminou sem dados suficientes.'}</p>
+                     </div>
+                     <div className="flex flex-col sm:flex-row gap-3">
+                       <button onClick={() => processAllPages(pages)} disabled={pages.length === 0} className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px] hover:bg-orange-500 disabled:opacity-40 transition-all">
+                         Tentar novamente
+                       </button>
+                       <button onClick={() => fileInputRef.current?.click()} className="px-6 py-3 bg-white border border-slate-200 text-slate-700 rounded-2xl font-black uppercase text-[10px] hover:border-orange-500 transition-all">
+                         Escolher outra foto
+                       </button>
+                     </div>
+                   </>
+                 )}
+               </div>
+             )}
           </div>
         </div>
       )}
