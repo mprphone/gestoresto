@@ -379,7 +379,7 @@ const App: React.FC = () => {
           {activeTab === 'move' && <StockMovement products={products} movements={movements} onTransfer={handleStockMovement} categories={categories} hideStock={isFuncionario} />}
           {!isFuncionario && <>
             {activeTab === 'dash' && <Dashboard products={products} movements={movements} />}
-            {activeTab === 'inv' && <InventoryList products={products} movements={movements} categories={categories} />}
+            {activeTab === 'inv' && <InventoryList products={products} movements={movements} categories={categories} onUpdateProduct={handleUpdateProduct} />}
             {activeTab === 'suppliers' && <SupplierManagement suppliers={suppliers} />}
             {activeTab === 'restaurant' && <RestaurantSettings profile={restaurantProfile} onSave={handleSaveRestaurantProfile} />}
             {activeTab === 'employees' && <EmployeesManagement users={users} onSave={handleSaveUser} />}

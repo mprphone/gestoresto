@@ -1,30 +1,31 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Product, Category, Movement, MovementType } from '../types';
-import { 
-  Search, 
-  Package, 
-  Wine, 
-  Beef, 
-  Fish, 
-  Carrot, 
-  Coffee, 
-  Layers, 
-  ArrowUpRight, 
-  ArrowDownRight, 
-  Trash2, 
+import {
+  Search,
+  Package,
+  Wine,
+  Beef,
+  Fish,
+  Carrot,
+  Coffee,
+  Layers,
+  ArrowUpRight,
+  ArrowDownRight,
+  Trash2,
   History,
   X,
-  ChevronRight,
-  TrendingUp,
   Building2,
-  Euro
+  Euro,
+  Pencil,
+  Check
 } from 'lucide-react';
 
 interface InventoryListProps {
   products: Product[];
   movements: Movement[];
   categories: Category[];
+  onUpdateProduct?: (id: string, data: Partial<Product>) => Promise<void>;
 }
 
 const getCategoryIcon = (cat: string) => {
@@ -48,12 +49,44 @@ const getCategoryColor = (cat: string) => {
   return 'bg-slate-50 text-slate-600 border-slate-100';
 };
 
-const InventoryList: React.FC<InventoryListProps> = ({ products, movements, categories }) => {
+const InventoryList: React.FC<InventoryListProps> = ({ products, movements, categories, onUpdateProduct }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | 'All'>('All');
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editUnit, setEditUnit] = useState('');
+  const [editMinStock, setEditMinStock] = useState(0);
+  const [isSaving, setIsSaving] = useState(false);
 
   const selectedProduct = products.find(p => p.id === selectedProductId);
+
+  useEffect(() => {
+    if (selectedProduct) {
+      setEditName(selectedProduct.name);
+      setEditCategory(selectedProduct.category);
+      setEditUnit(selectedProduct.unit);
+      setEditMinStock(selectedProduct.minStock);
+    }
+    setIsEditing(false);
+  }, [selectedProductId]);
+
+  const handleSave = async () => {
+    if (!selectedProduct || !onUpdateProduct) return;
+    setIsSaving(true);
+    try {
+      await onUpdateProduct(selectedProduct.id, {
+        name: editName.trim() || selectedProduct.name,
+        category: editCategory || selectedProduct.category,
+        unit: editUnit.trim() || selectedProduct.unit,
+        minStock: Number(editMinStock) || 0
+      });
+      setIsEditing(false);
+    } finally {
+      setIsSaving(false);
+    }
+  };
   
   const allProductMovements = movements
     .filter(m => m.productId === selectedProductId)
@@ -180,13 +213,84 @@ const InventoryList: React.FC<InventoryListProps> = ({ products, movements, cate
               <div className="p-8 bg-slate-900 text-white flex-shrink-0">
                 <div className="flex justify-between items-start mb-6">
                   <div className="p-4 bg-white/10 rounded-2xl">{getCategoryIcon(selectedProduct.category)}</div>
-                  <button onClick={() => setSelectedProductId(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
-                    <X size={20} className="text-white/40" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {onUpdateProduct && !isEditing && (
+                      <button onClick={() => setIsEditing(true)} className="p-2 hover:bg-white/10 rounded-full transition-colors" title="Editar artigo">
+                        <Pencil size={18} className="text-white/60" />
+                      </button>
+                    )}
+                    <button onClick={() => { setSelectedProductId(null); setIsEditing(false); }} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                      <X size={20} className="text-white/40" />
+                    </button>
+                  </div>
                 </div>
-                <h3 className="text-2xl font-black mb-1">{selectedProduct.name}</h3>
+                {isEditing ? (
+                  <input
+                    className="w-full bg-white/10 text-white font-black text-xl rounded-xl px-3 py-2 outline-none border border-white/20 focus:border-orange-400 mb-1"
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    autoFocus
+                  />
+                ) : (
+                  <h3 className="text-2xl font-black mb-1">{selectedProduct.name}</h3>
+                )}
                 <p className="text-[10px] font-black uppercase tracking-widest text-white/40">{selectedProduct.category}</p>
               </div>
+
+              {isEditing && (
+                <div className="px-8 pt-6 pb-2 space-y-4 border-b border-slate-100">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Editar Artigo</p>
+
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase">Família</label>
+                    <select
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black uppercase outline-none focus:border-orange-400"
+                      value={editCategory}
+                      onChange={e => setEditCategory(e.target.value)}
+                    >
+                      {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase">Unidade</label>
+                      <input
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black uppercase outline-none focus:border-orange-400"
+                        value={editUnit}
+                        onChange={e => setEditUnit(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase">Stock Mínimo</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black outline-none focus:border-orange-400"
+                        value={editMinStock}
+                        onChange={e => setEditMinStock(Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pb-2">
+                    <button
+                      onClick={() => setIsEditing(false)}
+                      className="flex-1 py-3 rounded-xl border border-slate-200 text-[10px] font-black text-slate-400 uppercase hover:bg-slate-50"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleSave}
+                      disabled={isSaving}
+                      className="flex-[2] py-3 rounded-xl bg-orange-500 text-white text-[10px] font-black uppercase flex items-center justify-center gap-2 hover:bg-orange-600 disabled:opacity-50"
+                    >
+                      <Check size={14} /> {isSaving ? 'A guardar…' : 'Guardar Alterações'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="p-8 space-y-8 flex-1">
                 <div className="grid grid-cols-2 gap-4">
