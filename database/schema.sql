@@ -41,6 +41,14 @@ as $$
   select trim(regexp_replace(lower(unaccent(coalesce(value, ''))), '[^a-z0-9]+', ' ', 'g'));
 $$;
 
+create or replace function normalize_invoice_doc_number(value text)
+returns text
+language sql
+immutable
+as $$
+  select regexp_replace(lower(unaccent(coalesce(value, ''))), '[^a-z0-9]+', '', 'g');
+$$;
+
 create or replace function touch_updated_at()
 returns trigger
 language plpgsql
@@ -252,6 +260,7 @@ create table if not exists purchase_invoices (
   supplier_id uuid references suppliers(id) on delete set null,
   supplier_name text not null,
   supplier_nif text not null,
+  normalized_supplier_nif text generated always as (regexp_replace(coalesce(supplier_nif, ''), '\D', '', 'g')) stored,
   customer_name text,
   customer_nif text,
   restaurant_profile_id uuid references restaurant_profile(id) on delete set null,
@@ -259,6 +268,7 @@ create table if not exists purchase_invoices (
     check (restaurant_match_status in ('VALIDO','ALERTA','NAO_VERIFICADO')),
   restaurant_match_notes text,
   doc_number text not null,
+  normalized_doc_number text generated always as (normalize_invoice_doc_number(doc_number)) stored,
   total_amount numeric(14,2) not null check (total_amount >= 0),
   date_issued date not null,
   due_date date,
@@ -285,10 +295,20 @@ create table if not exists purchase_invoices (
   updated_at timestamptz not null default now(),
   check (paid_amount <= total_amount)
 );
+alter table purchase_invoices
+  add column if not exists normalized_supplier_nif text generated always as (regexp_replace(coalesce(supplier_nif, ''), '\D', '', 'g')) stored,
+  add column if not exists normalized_doc_number text generated always as (normalize_invoice_doc_number(doc_number)) stored;
+
 create index if not exists invoices_supplier_date_idx on purchase_invoices (supplier_nif, date_issued desc, id desc);
 create index if not exists invoices_status_due_idx on purchase_invoices (status, due_date, id desc);
 create index if not exists invoices_date_pagination_idx on purchase_invoices (date_issued desc, id desc);
 create unique index if not exists invoices_unique_supplier_doc on purchase_invoices (supplier_nif, doc_number);
+create index if not exists invoices_supplier_doc_normalized_idx
+  on purchase_invoices (normalized_supplier_nif, normalized_doc_number)
+  where normalized_supplier_nif <> '' and normalized_doc_number <> '';
+create index if not exists invoices_duplicate_fingerprint_idx
+  on purchase_invoices (normalized_supplier_nif, total_amount, date_issued desc)
+  where normalized_supplier_nif <> '';
 
 alter table purchase_invoices
   add column if not exists customer_name text,

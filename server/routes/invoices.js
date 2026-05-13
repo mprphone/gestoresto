@@ -11,6 +11,52 @@ function onlyDigits(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
+function normalizeDocNumber(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+async function assertNotDuplicateInvoice(client, payload) {
+  const supplierNif = onlyDigits(payload.supplierNif);
+  const docNumber = normalizeDocNumber(payload.docNumber);
+  const totalCents = toCents(payload.totalAmount);
+  const dateIssued = payload.dateIssued || new Date().toISOString().slice(0, 10);
+
+  if (supplierNif && docNumber) {
+    const exact = await client.query(`
+      select id, supplier_name, doc_number, total_amount, date_issued
+      from purchase_invoices
+      where normalized_supplier_nif = $1 and normalized_doc_number = $2
+      limit 1
+    `, [supplierNif, docNumber]);
+    if (exact.rows[0]) {
+      const error = new Error(`Fatura duplicada: ${exact.rows[0].supplier_name} ${exact.rows[0].doc_number} já foi registada.`);
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+
+  if (supplierNif && totalCents !== null) {
+    const similar = await client.query(`
+      select id, supplier_name, doc_number, total_amount, date_issued
+      from purchase_invoices
+      where normalized_supplier_nif = $1
+        and abs(round(total_amount * 100) - $2) <= 1
+        and abs(date_issued - $3::date) <= 3
+      order by date_issued desc
+      limit 1
+    `, [supplierNif, totalCents, dateIssued]);
+    if (similar.rows[0]) {
+      const error = new Error(`Possível fatura duplicada: já existe ${similar.rows[0].doc_number} de ${similar.rows[0].date_issued} com o mesmo fornecedor e total.`);
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+}
+
 async function validateRestaurantCustomer(client, payload) {
   const profileResult = await client.query(`
     select *
@@ -129,6 +175,7 @@ invoicesRouter.post('/', async (req, res, next) => {
         error.statusCode = 422;
         throw error;
       }
+      await assertNotDuplicateInvoice(client, payload);
       let supplierId = payload.supplierId || null;
       if (!supplierId && payload.supplierNif) {
         const supplier = await client.query(`
