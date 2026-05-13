@@ -46,6 +46,17 @@ export interface RestaurantProfile {
   country?: string;
 }
 
+export type AppUserRole = 'admin' | 'funcionario' | 'compras' | 'cozinha' | 'financeiro';
+
+export interface AppUser {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role: AppUserRole;
+  isActive?: boolean;
+}
+
 export interface PurchaseInvoice {
   id: string;
   supplierId: string;

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { ArchiveDocumentType, Category, Product, Movement, MovementType, Supplier, PurchaseInvoice, InvoiceStatus, DefaultCategories, Payment, ProductAlias, PurchaseInvoiceLine, DigitalArchiveDocument, StockEntryLineInput, RestaurantProfile } from './types';
+import { ArchiveDocumentType, Category, Product, Movement, MovementType, Supplier, PurchaseInvoice, InvoiceStatus, DefaultCategories, Payment, ProductAlias, PurchaseInvoiceLine, DigitalArchiveDocument, StockEntryLineInput, RestaurantProfile, AppUser } from './types';
 import { listProductsPage, upsertProduct, deleteProduct } from './data/productsRepository';
 import { listSuppliersPage } from './data/suppliersRepository';
 import { listInvoicesPage, listInvoiceLines, createInvoiceWithLines } from './data/invoicesRepository';
@@ -9,6 +9,7 @@ import { listArchiveDocumentsForInvoice, uploadArchiveDocument } from './data/ar
 import { listMovementsPage, createMovement } from './data/movementsRepository';
 import { createBatchPayment, listPayments } from './data/paymentsRepository';
 import { getRestaurantProfile, saveRestaurantProfile } from './data/restaurantProfileRepository';
+import { listUsers, login, saveUser } from './data/authRepository';
 import Dashboard from './components/Dashboard';
 import InventoryList from './components/InventoryList';
 import StockEntry from './components/StockEntry';
@@ -21,6 +22,8 @@ import PurchasesList from './components/PurchasesList';
 import EquivalencesManagement from './components/EquivalencesManagement';
 import SystemNotice from './components/SystemNotice';
 import RestaurantSettings from './components/RestaurantSettings';
+import LoginScreen from './components/LoginScreen';
+import EmployeesManagement from './components/EmployeesManagement';
 import { 
   LayoutDashboard, 
   Package, 
@@ -32,7 +35,9 @@ import {
   Building2,
   Wallet,
   Link2,
-  Store
+  Store,
+  Users,
+  LogOut
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -46,7 +51,12 @@ const App: React.FC = () => {
   const [productAliases, setProductAliases] = useState<ProductAlias[]>([]);
   const [archiveDocuments, setArchiveDocuments] = useState<DigitalArchiveDocument[]>([]);
   const [restaurantProfile, setRestaurantProfile] = useState<RestaurantProfile | null>(null);
-  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'restaurant'>('dash');
+  const [users, setUsers] = useState<AppUser[]>([]);
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
+    const saved = localStorage.getItem('gestoresto_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'restaurant' | 'employees'>('dash');
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
@@ -62,14 +72,15 @@ const App: React.FC = () => {
 
   const refreshData = async () => {
     setLoadError(null);
-    const [productsPage, suppliersPage, invoicesPage, aliasesPage, movementsPage, paymentRows, profile] = await Promise.all([
+    const [productsPage, suppliersPage, invoicesPage, aliasesPage, movementsPage, paymentRows, profile, userRows] = await Promise.all([
       listProductsPage({ pageSize: 500 }),
       listSuppliersPage({ pageSize: 500 }),
       listInvoicesPage({ pageSize: 500 }),
       listAliasesForSupplier(undefined, { pageSize: 1000 }),
       listMovementsPage({ pageSize: 500 }),
       listPayments(),
-      getRestaurantProfile()
+      getRestaurantProfile(),
+      listUsers()
     ]);
 
     setProducts(productsPage.data);
@@ -79,6 +90,7 @@ const App: React.FC = () => {
     setMovements(movementsPage.data);
     setPayments(paymentRows);
     setRestaurantProfile(profile);
+    setUsers(userRows);
     setCategories(Array.from(new Set([...DefaultCategories, ...productsPage.data.map(p => p.category)])));
 
     const lineGroups = await Promise.all(invoicesPage.data.slice(0, 100).map(inv => listInvoiceLines(inv.id)));
@@ -88,11 +100,29 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!currentUser) {
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     refreshData()
       .catch(error => setLoadError(error.message || 'Falha ao carregar dados'))
       .finally(() => setIsLoading(false));
-  }, []);
+  }, [currentUser]);
+
+  const handleLogin = async (email: string, password: string) => {
+    const user = await login(email, password);
+    setCurrentUser(user);
+    localStorage.setItem('gestoresto_user', JSON.stringify(user));
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('gestoresto_user');
+    setCurrentUser(null);
+    setProducts([]);
+    setInvoices([]);
+    setUsers([]);
+  };
 
   const handleCreateProduct = async (data: any) => {
     const draft: Product = {
@@ -221,6 +251,13 @@ const App: React.FC = () => {
     }, 'Dados do restaurante guardados.');
   };
 
+  const handleSaveUser = async (user: Partial<AppUser> & { name: string; email: string; password?: string }) => {
+    await runAction(async () => {
+      const saved = await saveUser(user);
+      setUsers(prev => [...prev.filter(u => u.id !== saved.id), saved].sort((a, b) => a.name.localeCompare(b.name)));
+    }, 'Funcionário guardado.');
+  };
+
   const handleStockMovement = async (productId: string, qty: number, type: MovementType, photoUrl?: string) => {
     const product = products.find(p => p.id === productId);
     if (!product) return;
@@ -266,6 +303,10 @@ const App: React.FC = () => {
     }, 'Pagamento registado.');
   };
 
+  if (!currentUser) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
       {notice && <SystemNotice type={notice.type} message={notice.message} onClose={() => setNotice(null)} />}
@@ -283,10 +324,17 @@ const App: React.FC = () => {
           <NavItem icon={<Wallet />} label="Pagamentos" active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} />
           <NavItem icon={<Building2 />} label="Fornecedores" active={activeTab === 'suppliers'} onClick={() => setActiveTab('suppliers')} />
           <NavItem icon={<Store />} label="Restaurante" active={activeTab === 'restaurant'} onClick={() => setActiveTab('restaurant')} />
+          {currentUser.role === 'admin' && <NavItem icon={<Users />} label="Funcionários" active={activeTab === 'employees'} onClick={() => setActiveTab('employees')} />}
           <NavItem icon={<BookOpen />} label="Catálogo" active={activeTab === 'catalog'} onClick={() => setActiveTab('catalog')} />
           <NavItem icon={<Link2 />} label="Equivalências" active={activeTab === 'equiv'} onClick={() => setActiveTab('equiv')} />
           <NavItem icon={<BarChart3 />} label="Análises" active={activeTab === 'rep'} onClick={() => setActiveTab('rep')} />
         </nav>
+        <div className="p-6 border-t border-slate-800">
+          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">{currentUser.name}</p>
+          <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all font-bold text-sm">
+            <LogOut size={18} /> Sair
+          </button>
+        </div>
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0">
@@ -307,6 +355,7 @@ const App: React.FC = () => {
           {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} productAliases={productAliases} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} />}
           {activeTab === 'suppliers' && <SupplierManagement suppliers={suppliers} />}
           {activeTab === 'restaurant' && <RestaurantSettings profile={restaurantProfile} onSave={handleSaveRestaurantProfile} />}
+          {activeTab === 'employees' && <EmployeesManagement users={users} onSave={handleSaveUser} />}
           {activeTab === 'finance' && <PurchasesList invoices={invoices} invoiceLines={invoiceLines} products={products} archiveDocuments={archiveDocuments} payments={payments} onMarkAsPaid={handleMarkAsPaid} />}
           {activeTab === 'catalog' && (
             <ProductCatalog 

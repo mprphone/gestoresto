@@ -21,9 +21,11 @@ exception when duplicate_object then null;
 end $$;
 
 do $$ begin
-  create type app_role as enum ('admin','compras','cozinha','financeiro');
+  create type app_role as enum ('admin','funcionario','compras','cozinha','financeiro');
 exception when duplicate_object then null;
 end $$;
+
+alter type app_role add value if not exists 'funcionario';
 
 do $$ begin
   create type email_status as enum ('PENDENTE','ENVIADO','FALHOU','SIMULADO');
@@ -108,14 +110,20 @@ create table if not exists app_users (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   email text not null,
+  phone text,
   password_hash text not null,
-  role app_role not null default 'compras',
+  role app_role not null default 'funcionario',
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 create unique index if not exists app_users_email_unique on app_users (lower(email));
 create index if not exists app_users_active_role_idx on app_users (is_active, role);
+
+alter table app_users
+  add column if not exists phone text;
+alter table app_users
+  alter column role set default 'funcionario';
 
 drop trigger if exists app_users_touch_updated_at on app_users;
 create trigger app_users_touch_updated_at

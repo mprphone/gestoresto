@@ -7,7 +7,7 @@ import { suppliersRouter } from './routes/suppliers.js';
 import { aliasesRouter } from './routes/aliases.js';
 import { invoicesRouter } from './routes/invoices.js';
 import { archiveRouter } from './routes/archive.js';
-import { authRouter } from './routes/auth.js';
+import { authRouter, ensureDefaultAdminUser } from './routes/auth.js';
 import { conversionsRouter } from './routes/conversions.js';
 import { movementsRouter } from './routes/movements.js';
 import { paymentsRouter } from './routes/payments.js';
@@ -79,3 +79,7 @@ export const server = app.listen(config.port, '0.0.0.0', () => {
   console.log(`GestoResto API on http://0.0.0.0:${config.port}`);
 });
 server.ref();
+
+ensureDefaultAdminUser().catch(error => {
+  console.error('Failed to ensure default admin user', error);
+});
