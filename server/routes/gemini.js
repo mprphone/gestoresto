@@ -16,9 +16,15 @@ geminiRouter.post('/analyze-invoice', async (req, res, next) => {
 
     const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
-    const imageParts = images.map(base64 => ({
-      inlineData: { mimeType: 'image/jpeg', data: base64 }
-    }));
+    const imageParts = images.map(image => {
+      const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(String(image || ''));
+      return {
+        inlineData: {
+          mimeType: match?.[1] || 'image/jpeg',
+          data: match?.[2] || image
+        }
+      };
+    });
 
     const response = await ai.models.generateContent({
       model: config.geminiModel,

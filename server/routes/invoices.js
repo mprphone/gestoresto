@@ -1,4 +1,8 @@
 import { Router } from 'express';
+import crypto from 'crypto';
+import fs from 'fs/promises';
+import path from 'path';
+import PDFDocument from 'pdfkit';
 import { query, withTransaction } from '../db.js';
 import { pageRange, pageResult } from '../pagination.js';
 import { audit } from '../audit.js';
@@ -17,6 +21,115 @@ function normalizeDocNumber(value) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '');
+}
+
+function safeFileName(value) {
+  return String(value || 'documento')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120);
+}
+
+function invoiceBaseName(invoice, payload) {
+  const doc = safeFileName(invoice.doc_number || payload.docNumber || 'SN');
+  const supplier = safeFileName(invoice.supplier_name || payload.supplierName || 'Fornecedor');
+  return `FT_${doc}_${supplier}`;
+}
+
+async function insertGeneratedArchiveDocument(client, {
+  documentType = 'FATURA',
+  invoiceId,
+  supplierId,
+  filename,
+  mimeType,
+  storagePath,
+  localRoot,
+  pageCount = 1,
+  qualityOk,
+  hasQrCode,
+  hasAtcud,
+  atcud,
+  notes
+}) {
+  const buffer = await fs.readFile(storagePath);
+  const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+  const result = await client.query(`
+    insert into digital_archive_documents (
+      document_type, invoice_id, supplier_id, original_filename,
+      mime_type, byte_size, sha256, storage_provider, storage_path,
+      local_root, page_count, quality_ok, has_qr_code, has_atcud, atcud, notes
+    )
+    values ($1::archive_document_type, $2, $3, $4, $5, $6, $7, 'bunker', $8, $9, $10, $11, $12, $13, $14, $15)
+    on conflict (sha256) where sha256 is not null do update set
+      invoice_id = coalesce(excluded.invoice_id, digital_archive_documents.invoice_id),
+      supplier_id = coalesce(excluded.supplier_id, digital_archive_documents.supplier_id)
+    returning *
+  `, [
+    documentType, invoiceId, supplierId, filename, mimeType, buffer.length, sha256, storagePath,
+    localRoot, pageCount, qualityOk, hasQrCode, hasAtcud, atcud || null, notes || null
+  ]);
+  const saved = result.rows[0];
+  const withUrl = await client.query(
+    'update digital_archive_documents set public_url = $1 where id = $2 returning *',
+    [`/api/archive/file/${saved.id}`, saved.id]
+  );
+  return withUrl.rows[0];
+}
+
+async function generateInvoicePdf({ invoice, payload, imageDocuments, outputPath }) {
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  const doc = new PDFDocument({ size: 'A4', autoFirstPage: false, margin: 36, info: {
+    Title: invoiceBaseName(invoice, payload),
+    Author: 'GestoResto',
+    Subject: 'Fatura processada automaticamente'
+  }});
+  const chunks = [];
+  doc.on('data', chunk => chunks.push(chunk));
+  const done = new Promise((resolve, reject) => {
+    doc.on('end', resolve);
+    doc.on('error', reject);
+  });
+  const processedAt = new Date();
+  const qrState = payload.hasQrCode ? 'OK' : 'Falhou';
+
+  for (const [index, image] of imageDocuments.entries()) {
+    doc.addPage({ size: 'A4', margin: 36 });
+    const pageWidth = doc.page.width;
+    const pageHeight = doc.page.height;
+    const footerHeight = 34;
+    const contentTop = 28;
+    const contentHeight = pageHeight - contentTop - footerHeight - 34;
+    try {
+      doc.image(image.storage_path, 28, contentTop, {
+        fit: [pageWidth - 56, contentHeight],
+        align: 'center',
+        valign: 'center'
+      });
+    } catch (error) {
+      doc.fontSize(12).fillColor('#991b1b').text(`Não foi possível inserir a imagem da página ${index + 1}.`, 50, 120);
+    }
+    doc
+      .moveTo(36, pageHeight - footerHeight - 8)
+      .lineTo(pageWidth - 36, pageHeight - footerHeight - 8)
+      .strokeColor('#d1d5db')
+      .lineWidth(0.5)
+      .stroke();
+    doc
+      .fontSize(8)
+      .fillColor('#475569')
+      .text(
+        `Processado automaticamente por GestoResto | Estado QR: ${qrState} | ${processedAt.toISOString()} | Nº interno: ${invoice.id} | Página ${index + 1}/${imageDocuments.length}`,
+        36,
+        pageHeight - footerHeight,
+        { width: pageWidth - 72, align: 'center' }
+      );
+  }
+
+  doc.end();
+  await done;
+  await fs.writeFile(outputPath, Buffer.concat(chunks));
 }
 
 async function assertNotDuplicateInvoice(client, payload) {
@@ -261,6 +374,72 @@ invoicesRouter.post('/', async (req, res, next) => {
           `, [archiveDocument.id, archiveDocument.public_url, invoiceId]);
       }
 
+      let pdfDocument = null;
+      let jsonDocument = null;
+      if (archiveDocuments.length > 0) {
+        const baseName = invoiceBaseName(invoice.rows[0], payload);
+        const folder = path.join(config.archiveRoot, 'faturas', String(invoiceId));
+        const pdfPath = path.join(folder, `${baseName}.pdf`);
+        const jsonPath = path.join(folder, `${baseName}.json`);
+        const ocrPayload = {
+          invoice: invoice.rows[0],
+          extracted: payload.ocrJson || null,
+          validation: {
+            hasQrCode: payload.hasQrCode,
+            qrCodeText: payload.qrCodeText,
+            qrTotalAmount: payload.qrTotalAmount,
+            calculatedLinesTotal: payload.calculatedLinesTotal,
+            totalValidationStatus: totalValidation.status,
+            totalValidationNotes: totalValidation.notes || null
+          },
+          lines: payload.lines || [],
+          sourceImages: archiveDocuments.map(doc => ({
+            id: doc.id,
+            originalFilename: doc.original_filename,
+            mimeType: doc.mime_type,
+            sha256: doc.sha256,
+            storagePath: doc.storage_path,
+            publicUrl: doc.public_url
+          })),
+          processedAt: new Date().toISOString()
+        };
+
+        await fs.mkdir(folder, { recursive: true });
+        await fs.writeFile(jsonPath, JSON.stringify(ocrPayload, null, 2));
+        jsonDocument = await insertGeneratedArchiveDocument(client, {
+          documentType: 'OUTRO',
+          invoiceId,
+          supplierId,
+          filename: `${baseName}.json`,
+          mimeType: 'application/json',
+          storagePath: jsonPath,
+          localRoot: config.archiveRoot,
+          pageCount: 1,
+          qualityOk: payload.imageQualityOk,
+          hasQrCode: payload.hasQrCode,
+          hasAtcud: payload.hasAtcud,
+          atcud: payload.atcud,
+          notes: 'JSON OCR extraído automaticamente.'
+        });
+
+        await generateInvoicePdf({ invoice: invoice.rows[0], payload, imageDocuments: archiveDocuments, outputPath: pdfPath });
+        pdfDocument = await insertGeneratedArchiveDocument(client, {
+          documentType: 'FATURA',
+          invoiceId,
+          supplierId,
+          filename: `${baseName}.pdf`,
+          mimeType: 'application/pdf',
+          storagePath: pdfPath,
+          localRoot: config.archiveRoot,
+          pageCount: archiveDocuments.length,
+          qualityOk: payload.imageQualityOk,
+          hasQrCode: payload.hasQrCode,
+          hasAtcud: payload.hasAtcud,
+          atcud: payload.atcud,
+          notes: 'PDF gerado automaticamente a partir das imagens originais.'
+        });
+      }
+
       const lines = [];
       for (const [index, line] of (payload.lines || []).entries()) {
         const lineResult = await client.query(`
@@ -359,13 +538,19 @@ invoicesRouter.post('/', async (req, res, next) => {
 
       await audit(client, req, 'create', 'purchase_invoices', invoiceId, null, { ...invoice.rows[0], lines });
       if (config.invoiceOkEmailTo) {
-        const invoiceAttachments = archiveDocuments
-          .filter(doc => doc.storage_path)
-          .map((doc, index) => ({
-            filename: doc.original_filename || `fatura-${payload.docNumber || invoiceId}-pag-${index + 1}.jpg`,
-            path: doc.storage_path,
-            contentType: doc.mime_type || undefined
-          }));
+        const invoiceAttachments = pdfDocument?.storage_path
+          ? [{
+              filename: pdfDocument.original_filename || `${invoiceBaseName(invoice.rows[0], payload)}.pdf`,
+              path: pdfDocument.storage_path,
+              contentType: 'application/pdf'
+            }]
+          : archiveDocuments
+              .filter(doc => doc.storage_path)
+              .map((doc, index) => ({
+                filename: doc.original_filename || `fatura-${payload.docNumber || invoiceId}-pag-${index + 1}.jpg`,
+                path: doc.storage_path,
+                contentType: doc.mime_type || undefined
+              }));
         await sendTrackedEmail(client, req, {
           recipient: config.invoiceOkEmailTo,
           subject: `Fatura registada: ${payload.docNumber || 'S/N'} - ${payload.supplierName || 'Fornecedor'}`,
@@ -377,7 +562,8 @@ invoicesRouter.post('/', async (req, res, next) => {
             `Documento: ${payload.docNumber || 'S/N'}`,
             `Total: ${Number(payload.totalAmount || 0).toFixed(2)} EUR`,
             `QR: ${payload.qrTotalAmount ? `OK (${Number(payload.qrTotalAmount).toFixed(2)} EUR)` : 'Não verificado'}`,
-            `Arquivo: ${archiveDocument?.public_url || invoice.rows[0].photo_url || 'Sem URL'}`,
+            `PDF: ${pdfDocument?.public_url || 'Não gerado'}`,
+            `Arquivo original: ${archiveDocument?.public_url || invoice.rows[0].photo_url || 'Sem URL'}`,
             '',
             'Estado: fatura guardada com sucesso.'
           ].join('\n'),
@@ -386,7 +572,7 @@ invoicesRouter.post('/', async (req, res, next) => {
           relatedEntityId: invoiceId
         });
       }
-      return { invoice: invoice.rows[0], lines, archiveDocument };
+      return { invoice: invoice.rows[0], lines, archiveDocument, pdfDocument, jsonDocument };
     });
     res.status(201).json(saved);
   } catch (error) {

@@ -186,9 +186,11 @@ const App: React.FC = () => {
     const archiveDocuments: DigitalArchiveDocument[] = [];
     if (invoicePhotos.length > 0) {
       for (const [index, dataUrl] of invoicePhotos.entries()) {
+        const mime = /data:(.*?);base64/.exec(dataUrl)?.[1] || 'image/jpeg';
+        const extension = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
         const savedDocument = await uploadArchiveDocument({
           dataUrl,
-          filename: `${supplierNif || 'sem-nif'}-${invoiceData?.docNumber || 'sn'}-pag-${index + 1}.jpg`,
+          filename: `${supplierNif || 'sem-nif'}-${invoiceData?.docNumber || 'sn'}-pag-${index + 1}.${extension}`,
           documentType: ArchiveDocumentType.INVOICE,
           qualityOk: invoiceData?.digitalCompliance?.imageQualityOk,
           hasQrCode: invoiceData?.digitalCompliance?.hasQrCode,
@@ -248,6 +250,7 @@ const App: React.FC = () => {
       totalValidationStatus: invoiceData?.totalValidationStatus,
       totalValidationNotes: invoiceData?.totalValidationNotes,
       complianceNotes: invoiceData?.digitalCompliance?.complianceNotes,
+      ocrJson: invoiceData,
       lines
       });
       await refreshData();

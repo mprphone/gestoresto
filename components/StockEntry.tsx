@@ -122,6 +122,7 @@ interface PageQuality {
 const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, productAliases, categories, onComplete, onQuickCreateProduct }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [pages, setPages] = useState<string[]>([]);
+  const [originalPages, setOriginalPages] = useState<string[]>([]);
   const [extractedData, setExtractedData] = useState<InvoiceExtractedData | null>(null);
   const [mapping, setMapping] = useState<Record<number, string>>({}); 
   const [matchConfidences, setMatchConfidences] = useState<Record<number, number>>({});
@@ -678,6 +679,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setProcessingError(null);
     try {
       const newPages: string[] = [];
+      const newOriginalPages: string[] = [];
       const newQualities: PageQuality[] = [];
       for (let i = 0; i < files.length; i++) {
         const reader = new FileReader();
@@ -686,18 +688,22 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           reader.onerror = () => reject(new Error('Falha ao ler imagem'));
         });
         reader.readAsDataURL(files[i]);
-        const normalized = await normalizeInvoiceImage(await p);
+        const originalDataUrl = await p;
+        const normalized = await normalizeInvoiceImage(originalDataUrl);
+        newOriginalPages.push(originalDataUrl);
         newPages.push(normalized.data);
         newQualities.push(normalized.quality);
       }
       const updated = [...pages, ...newPages];
+      const updatedOriginals = [...originalPages, ...newOriginalPages];
       const newQrPayloads = await scanQrPayloads(newPages);
       const updatedQrPayloads = [...qrPayloads, ...newQrPayloads];
       const updatedQualities = [...pageQualities, ...newQualities.map((quality, index) => ({ ...quality, hasQrCode: Boolean(newQrPayloads[index]) }))];
       setPages(updated);
+      setOriginalPages(updatedOriginals);
       setQrPayloads(updatedQrPayloads);
       setPageQualities(updatedQualities);
-      await processAllPages(updated, updatedQrPayloads);
+      await processAllPages(updatedOriginals, updatedQrPayloads);
     } catch (error) {
       setProcessingError('Não consegui abrir essa fotografia. Tente outro ficheiro ou tire uma nova foto.');
       setIsProcessing(false);
@@ -724,11 +730,13 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     const captured = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
     const normalized = await normalizeInvoiceImage(`data:image/jpeg;base64,${captured}`);
     const updated = [...pages, normalized.data];
+    const updatedOriginals = [...originalPages, `data:image/jpeg;base64,${captured}`];
     const newQrPayloads = await scanQrPayloads([normalized.data]);
     const updatedQrPayloads = [...qrPayloads, ...newQrPayloads];
     setPages(updated);
+    setOriginalPages(updatedOriginals);
     setQrPayloads(updatedQrPayloads);
-    setPageQualities(prev => [...prev, { ...normalized.quality, hasQrCode: newQrPayloads.length > 0 }]);
+    setPageQualities(prev => [...prev, { ...normalized.quality, hasQrCode: Boolean(newQrPayloads[0]) }]);
 
     // Detect long invoice: paper aspect ratio height/width > 2.5
     const isLong = normalized.width > 0 && (normalized.height / normalized.width) > 2.5;
@@ -741,17 +749,17 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       // Auto-analyse after 3 parts
       if (newPartCount >= 3) {
         closeCamera();
-        await processAllPages(updated, updatedQrPayloads);
+        await processAllPages(updatedOriginals, updatedQrPayloads);
       }
       // else: camera stays open — user taps "Analisar" or "Fotografar Parte X"
     } else {
       closeCamera();
-      await processAllPages(updated, updatedQrPayloads);
+      await processAllPages(updatedOriginals, updatedQrPayloads);
     }
   };
 
   const analyzeCameraParts = async () => {
-    const currentPages = pages;
+    const currentPages = originalPages.length > 0 ? originalPages : pages;
     const currentQrPayloads = qrPayloads;
     closeCamera();
     await processAllPages(currentPages, currentQrPayloads);
@@ -792,7 +800,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           confidence: matchConfidences[idx] || 55
         };
       });
-      const invoicePhotos = pages.map(page => `data:image/jpeg;base64,${page}`);
+      const sourcePages = originalPages.length > 0 ? originalPages : pages.map(page => `data:image/jpeg;base64,${page}`);
+      const invoicePhotos = sourcePages.map(page => page.startsWith('data:') ? page : `data:image/jpeg;base64,${page}`);
       onComplete(itemsToSubmit, invoicePhotos[0], { name: supplier, nif }, {
         docNumber,
         totalAmount: extractedData.totalInvoiceAmount,
@@ -951,6 +960,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                         <img src={`data:image/jpeg;base64,${p}`} className="w-full h-full object-cover" />
                         <button onClick={() => {
                           setPages(prev => prev.filter((_, i) => i !== idx));
+                          setOriginalPages(prev => prev.filter((_, i) => i !== idx));
                           setQrPayloads(prev => prev.filter((_, i) => i !== idx));
                           setPageQualities(prev => prev.filter((_, i) => i !== idx));
                           setProcessingError(null);
@@ -1101,7 +1111,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                        <p className="text-[10px] font-bold text-slate-300 mt-3">O total final da fatura tem de bater com o total do QR quando este for lido. As linhas podem estar sem IVA.</p>
                      </div>
                      <div className="flex flex-col sm:flex-row gap-3">
-                       <button onClick={() => processAllPages(pages)} disabled={pages.length === 0} className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px] hover:bg-orange-500 disabled:opacity-40 transition-all">
+                       <button onClick={() => processAllPages(originalPages.length > 0 ? originalPages : pages)} disabled={pages.length === 0} className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px] hover:bg-orange-500 disabled:opacity-40 transition-all">
                          Tentar novamente
                        </button>
                        <button onClick={() => fileInputRef.current?.click()} className="px-6 py-3 bg-white border border-slate-200 text-slate-700 rounded-2xl font-black uppercase text-[10px] hover:border-orange-500 transition-all">
