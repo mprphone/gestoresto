@@ -28,7 +28,7 @@ export interface InvoiceExtractedData {
     hasQrCode: boolean;
     hasAtcud: boolean;
     isCompliant: boolean;
-    imageQualityOk: boolean; // Novo: validação de nitidez/luz
+    imageQualityOk: boolean;
     complianceNotes?: string;
     isMissingPages: boolean;
   };
@@ -37,7 +37,7 @@ export interface InvoiceExtractedData {
 export const processInvoiceImage = async (base64Images: string[]): Promise<InvoiceExtractedData | null> => {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    
+
     const imageParts = base64Images.map(base64 => ({
       inlineData: { mimeType: 'image/jpeg', data: base64 }
     }));
@@ -47,17 +47,24 @@ export const processInvoiceImage = async (base64Images: string[]): Promise<Invoi
       contents: {
         parts: [
           ...imageParts,
-          { text: `Analise estas imagens de faturas para um restaurante. 
-          Extraia: Fornecedor, NIF do fornecedor, Cliente/Comprador, NIF do cliente/comprador, Nº Fatura, Itens (nome, código de artigo se existir, qtd, unidade, preço un., total, IVA, categoria/família sugerida) e total final da fatura.
-          
-          VALIDAÇÃO TÉCNICA/LEGAL:
-          1. Avalie a qualidade da imagem: Está nítida e legível para arquivo digital legal (imageQualityOk)?
-          2. Detete QR Code e ATCUD (obrigatórios em Portugal).
-          2.1. Se conseguir ler o conteúdo do QR Code, devolva qrCodeText e o valor total bruto do campo O do QR Code em qrTotalAmount. Nas faturas portuguesas, o campo O corresponde ao GrossTotal/Total amount.
-          3. Verifique se faltam páginas (ex: referências a 'pág 1/2' sem a pág 2).
-          4. Some os totais das linhas e devolva calculatedLinesTotal. Se as linhas vierem sem IVA, esta soma deve ser o subtotal/base tributável, não o total bruto.
-          
-          Retorne em JSON estrito.` }
+          { text: `Analise este documento de compra (fatura, nota de entrega, guia de remessa, nota de equipamento ou similar).
+
+EXTRAÇÃO DE ARTIGOS — REGRA PRINCIPAL:
+Extraia TODOS os artigos/produtos/itens/linhas presentes no documento, sem excepção.
+Para cada artigo inclua sempre o campo "name". Para os campos numéricos (quantity, unitPrice, totalPrice) use 0 se não conseguir ler com clareza — nunca omita um artigo por causa de campos em falta.
+Extraia também: código do artigo, unidade de medida, taxa de IVA, data de validade se existir, e categoria sugerida.
+
+CABEÇALHO:
+Fornecedor (nome, NIF, email, telefone), Cliente (nome, NIF), Número do documento, Total do documento.
+
+VALIDAÇÃO TÉCNICA/LEGAL:
+1. Qualidade da imagem para arquivo digital (imageQualityOk).
+2. Detete QR Code e ATCUD (obrigatórios em faturas portuguesas).
+   Se ler o QR Code devolva qrCodeText e o valor do campo O (GrossTotal) em qrTotalAmount.
+3. Verifique se faltam páginas (ex: "pág 1/2" sem pág 2) → isMissingPages.
+4. Some os totais das linhas → calculatedLinesTotal (sem IVA se as linhas não incluírem IVA).
+
+Devolva JSON estrito.` }
         ]
       },
       config: {
@@ -79,18 +86,18 @@ export const processInvoiceImage = async (base64Images: string[]): Promise<Invoi
               type: Type.ARRAY,
               items: {
                 type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    supplierItemCode: { type: Type.STRING },
-                    quantity: { type: Type.NUMBER },
-                    unit: { type: Type.STRING },
-                    unitPrice: { type: Type.NUMBER },
-                    totalPrice: { type: Type.NUMBER },
-                    vatRate: { type: Type.NUMBER },
-                    category: { type: Type.STRING },
-                    expiryDate: { type: Type.STRING }
-                  },
-                required: ["name", "quantity", "unitPrice"]
+                properties: {
+                  name: { type: Type.STRING },
+                  supplierItemCode: { type: Type.STRING },
+                  quantity: { type: Type.NUMBER },
+                  unit: { type: Type.STRING },
+                  unitPrice: { type: Type.NUMBER },
+                  totalPrice: { type: Type.NUMBER },
+                  vatRate: { type: Type.NUMBER },
+                  category: { type: Type.STRING },
+                  expiryDate: { type: Type.STRING }
+                },
+                required: ["name"]
               }
             },
             totalInvoiceAmount: { type: Type.NUMBER },
@@ -114,7 +121,18 @@ export const processInvoiceImage = async (base64Images: string[]): Promise<Invoi
 
     const text = response.text;
     if (!text) return null;
-    return JSON.parse(text) as InvoiceExtractedData;
+    const parsed = JSON.parse(text) as InvoiceExtractedData;
+
+    // Ensure numeric defaults for any items where the model left fields undefined
+    parsed.items = (parsed.items || []).map(item => ({
+      ...item,
+      quantity: Number(item.quantity) || 1,
+      unitPrice: Number(item.unitPrice) || 0,
+      totalPrice: Number(item.totalPrice) || 0,
+      category: item.category || 'Outros'
+    }));
+
+    return parsed;
   } catch (error) {
     console.error("Erro no processamento IA:", error);
     return null;
