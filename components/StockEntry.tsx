@@ -633,9 +633,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       )}
 
       {isCameraOpen && (
-        <div className="fixed inset-0 z-[120] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-5xl bg-slate-900 border border-white/10 rounded-[2rem] overflow-hidden shadow-2xl">
-            <div className="p-4 flex items-center justify-between text-white">
+        <div className="fixed inset-0 z-[120] bg-slate-950 md:bg-slate-950/90 md:backdrop-blur-sm flex items-stretch md:items-center justify-center md:p-4">
+          <div className="relative w-full h-[100dvh] md:h-auto md:max-w-5xl bg-slate-900 border-white/10 md:border md:rounded-[2rem] overflow-hidden shadow-2xl flex flex-col">
+            <div className="absolute top-0 left-0 right-0 z-10 p-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between text-white bg-gradient-to-b from-black/75 to-transparent">
               <div>
                 <h4 className="font-black uppercase text-sm">Câmara</h4>
                 <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Enquadre a fatura e fotografe</p>
@@ -644,13 +644,13 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                 <X size={20} />
               </button>
             </div>
-            <div className="bg-black aspect-[4/3] md:aspect-video">
-              <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-contain" />
+            <div className="bg-black flex-1 min-h-0 md:aspect-video md:flex-none">
+              <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
             </div>
-            {cameraError && <p className="px-6 pt-4 text-xs font-bold text-red-300">{cameraError}</p>}
-            <div className="p-5 flex flex-col sm:flex-row gap-3 justify-end bg-slate-900">
-              <button onClick={closeCamera} className="px-6 py-4 rounded-2xl border border-white/10 text-white/60 font-black uppercase text-xs hover:text-white hover:bg-white/10 transition-all">Cancelar</button>
-              <button onClick={captureCameraPage} className="px-8 py-4 rounded-2xl bg-orange-500 text-white font-black uppercase text-xs hover:bg-orange-600 transition-all flex items-center justify-center gap-2">
+            {cameraError && <p className="absolute left-4 right-4 bottom-28 z-10 p-3 rounded-2xl bg-red-500/90 text-xs font-bold text-white">{cameraError}</p>}
+            <div className="absolute left-0 right-0 bottom-0 z-10 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex gap-3 justify-end bg-gradient-to-t from-black/80 to-transparent">
+              <button onClick={closeCamera} className="px-5 py-4 rounded-2xl border border-white/10 text-white/80 font-black uppercase text-xs hover:text-white hover:bg-white/10 transition-all">Cancelar</button>
+              <button onClick={captureCameraPage} className="flex-1 sm:flex-none px-8 py-4 rounded-2xl bg-orange-500 text-white font-black uppercase text-xs hover:bg-orange-600 transition-all flex items-center justify-center gap-2 shadow-2xl">
                 <Camera size={18} /> Fotografar
               </button>
             </div>
