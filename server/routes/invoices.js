@@ -60,6 +60,37 @@ async function validateRestaurantCustomer(client, payload) {
   };
 }
 
+function toCents(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.round(number * 100);
+}
+
+function validateInvoiceTotals(payload) {
+  const invoiceTotalCents = toCents(payload.totalAmount);
+  const linesTotalCents = toCents(payload.calculatedLinesTotal);
+  const qrTotalCents = toCents(payload.qrTotalAmount);
+  const notes = [];
+
+  if (invoiceTotalCents === null) {
+    return { status: 'ALERTA', notes: 'Total da fatura inválido ou ausente.' };
+  }
+
+  if (linesTotalCents !== null && linesTotalCents !== invoiceTotalCents) {
+    notes.push(`Total das linhas (${(linesTotalCents / 100).toFixed(2)}) não corresponde ao total da fatura (${(invoiceTotalCents / 100).toFixed(2)}).`);
+  }
+
+  if (qrTotalCents !== null && qrTotalCents !== invoiceTotalCents) {
+    notes.push(`Total do QR (${(qrTotalCents / 100).toFixed(2)}) não corresponde ao total da fatura (${(invoiceTotalCents / 100).toFixed(2)}).`);
+  }
+
+  return {
+    status: notes.length > 0 ? 'ALERTA' : (linesTotalCents !== null || qrTotalCents !== null ? 'VALIDO' : 'NAO_VERIFICADO'),
+    notes: notes.join(' ')
+  };
+}
+
 invoicesRouter.get('/', async (req, res, next) => {
   try {
     const { page, pageSize, limit, offset } = pageRange(req);
@@ -95,6 +126,12 @@ invoicesRouter.post('/', async (req, res, next) => {
     const payload = req.body;
     const saved = await withTransaction(async client => {
       const restaurantValidation = await validateRestaurantCustomer(client, payload);
+      const totalValidation = validateInvoiceTotals(payload);
+      if (totalValidation.status === 'ALERTA') {
+        const error = new Error(totalValidation.notes || 'Os totais da fatura não correspondem.');
+        error.statusCode = 422;
+        throw error;
+      }
       let supplierId = payload.supplierId || null;
       if (!supplierId && payload.supplierNif) {
         const supplier = await client.query(`
@@ -123,12 +160,16 @@ invoicesRouter.post('/', async (req, res, next) => {
           doc_number, total_amount,
           date_issued, due_date, status, paid_amount, photo_url,
           primary_archive_document_id, has_qr_code, has_atcud, atcud,
-          image_quality_ok, is_missing_pages, compliance_notes
+          image_quality_ok, is_missing_pages,
+          qr_code_text, qr_total_amount, calculated_lines_total, total_validation_status, total_validation_notes,
+          compliance_notes
         )
         values (
           $1, $2, $3, $4, $5, $6, $7, $8,
           $9, $10, coalesce($11, current_date), $12, coalesce($13, 'PENDENTE'), coalesce($14, 0), $15,
-          $16, $17, $18, $19, $20, $21, $22
+          $16, $17, $18, $19, $20, $21,
+          $22, $23, $24, $25, $26,
+          $27
         )
         on conflict (supplier_nif, doc_number) do nothing
         returning *
@@ -139,7 +180,9 @@ invoicesRouter.post('/', async (req, res, next) => {
         payload.docNumber, payload.totalAmount,
         payload.dateIssued, payload.dueDate, payload.status, payload.paidAmount, payload.photoUrl,
         payload.primaryArchiveDocumentId, payload.hasQrCode, payload.hasAtcud, payload.atcud,
-        payload.imageQualityOk, payload.isMissingPages, payload.complianceNotes
+        payload.imageQualityOk, payload.isMissingPages,
+        payload.qrCodeText, payload.qrTotalAmount, payload.calculatedLinesTotal, totalValidation.status, totalValidation.notes || null,
+        payload.complianceNotes
       ]);
 
       if (!invoice.rows[0]) {

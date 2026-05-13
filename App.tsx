@@ -200,6 +200,11 @@ const App: React.FC = () => {
       atcud: invoiceData?.digitalCompliance?.atcud,
       imageQualityOk: invoiceData?.digitalCompliance?.imageQualityOk,
       isMissingPages: invoiceData?.digitalCompliance?.isMissingPages,
+      qrCodeText: invoiceData?.qrCodeText,
+      qrTotalAmount: invoiceData?.qrTotalAmount,
+      calculatedLinesTotal: invoiceData?.calculatedLinesTotal,
+      totalValidationStatus: invoiceData?.totalValidationStatus,
+      totalValidationNotes: invoiceData?.totalValidationNotes,
       complianceNotes: invoiceData?.digitalCompliance?.complianceNotes,
       lines
       });

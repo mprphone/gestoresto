@@ -9,6 +9,9 @@ export interface InvoiceExtractedData {
   supplierEmail?: string;
   supplierPhone?: string;
   invoiceNumber?: string;
+  qrCodeText?: string;
+  qrTotalAmount?: number;
+  calculatedLinesTotal?: number;
   items: {
     name: string;
     supplierItemCode?: string;
@@ -45,12 +48,14 @@ export const processInvoiceImage = async (base64Images: string[]): Promise<Invoi
         parts: [
           ...imageParts,
           { text: `Analise estas imagens de faturas para um restaurante. 
-          Extraia: Fornecedor, NIF do fornecedor, Cliente/Comprador, NIF do cliente/comprador, Nº Fatura, Itens (nome, código de artigo se existir, qtd, unidade, preço un., total, IVA, categoria/família sugerida).
+          Extraia: Fornecedor, NIF do fornecedor, Cliente/Comprador, NIF do cliente/comprador, Nº Fatura, Itens (nome, código de artigo se existir, qtd, unidade, preço un., total, IVA, categoria/família sugerida) e total final da fatura.
           
           VALIDAÇÃO TÉCNICA/LEGAL:
           1. Avalie a qualidade da imagem: Está nítida e legível para arquivo digital legal (imageQualityOk)?
           2. Detete QR Code e ATCUD (obrigatórios em Portugal).
+          2.1. Se conseguir ler o conteúdo do QR Code, devolva qrCodeText e o valor total bruto do campo O do QR Code em qrTotalAmount. Nas faturas portuguesas, o campo O corresponde ao GrossTotal/Total amount.
           3. Verifique se faltam páginas (ex: referências a 'pág 1/2' sem a pág 2).
+          4. Some os totais das linhas e devolva calculatedLinesTotal.
           
           Retorne em JSON estrito.` }
         ]
@@ -67,6 +72,9 @@ export const processInvoiceImage = async (base64Images: string[]): Promise<Invoi
             supplierEmail: { type: Type.STRING },
             supplierPhone: { type: Type.STRING },
             invoiceNumber: { type: Type.STRING },
+            qrCodeText: { type: Type.STRING },
+            qrTotalAmount: { type: Type.NUMBER },
+            calculatedLinesTotal: { type: Type.NUMBER },
             items: {
               type: Type.ARRAY,
               items: {

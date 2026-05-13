@@ -266,6 +266,12 @@ create table if not exists purchase_invoices (
   atcud text,
   image_quality_ok boolean,
   is_missing_pages boolean,
+  qr_code_text text,
+  qr_total_amount numeric(14,2),
+  calculated_lines_total numeric(14,2),
+  total_validation_status text not null default 'NAO_VERIFICADO'
+    check (total_validation_status in ('VALIDO','ALERTA','NAO_VERIFICADO')),
+  total_validation_notes text,
   compliance_notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -281,13 +287,24 @@ alter table purchase_invoices
   add column if not exists customer_nif text,
   add column if not exists restaurant_profile_id uuid references restaurant_profile(id) on delete set null,
   add column if not exists restaurant_match_status text not null default 'NAO_VERIFICADO',
-  add column if not exists restaurant_match_notes text;
+  add column if not exists restaurant_match_notes text,
+  add column if not exists qr_code_text text,
+  add column if not exists qr_total_amount numeric(14,2),
+  add column if not exists calculated_lines_total numeric(14,2),
+  add column if not exists total_validation_status text not null default 'NAO_VERIFICADO',
+  add column if not exists total_validation_notes text;
 
 alter table purchase_invoices
   drop constraint if exists purchase_invoices_restaurant_match_status_check;
 alter table purchase_invoices
   add constraint purchase_invoices_restaurant_match_status_check
   check (restaurant_match_status in ('VALIDO','ALERTA','NAO_VERIFICADO'));
+
+alter table purchase_invoices
+  drop constraint if exists purchase_invoices_total_validation_status_check;
+alter table purchase_invoices
+  add constraint purchase_invoices_total_validation_status_check
+  check (total_validation_status in ('VALIDO','ALERTA','NAO_VERIFICADO'));
 
 drop trigger if exists purchase_invoices_touch_updated_at on purchase_invoices;
 create trigger purchase_invoices_touch_updated_at

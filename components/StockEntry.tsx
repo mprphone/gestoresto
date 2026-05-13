@@ -22,6 +22,21 @@ const normalizeText = (value: string) =>
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 
+const moneyCents = (value?: number | null) => {
+  if (value === undefined || value === null || !Number.isFinite(Number(value))) return null;
+  return Math.round(Number(value) * 100);
+};
+
+const formatMoney = (cents: number) => (cents / 100).toFixed(2).replace('.', ',');
+
+const parsePortugueseQrTotal = (text: string) => {
+  const totalField = text.split('*').find(part => part.startsWith('O:'));
+  if (!totalField) return undefined;
+  const value = totalField.slice(2).replace(',', '.');
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
 const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, productAliases, categories, onComplete, onQuickCreateProduct }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [pages, setPages] = useState<string[]>([]);
@@ -38,6 +53,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [processingError, setProcessingError] = useState<string | null>(null);
+  const [qrPayloads, setQrPayloads] = useState<string[]>([]);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -115,7 +131,73 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     });
   };
 
-  const processAllPages = async (currentPages: string[]) => {
+  const scanQrPayloads = async (base64Pages: string[]) => {
+    const BarcodeDetectorCtor = (window as any).BarcodeDetector;
+    if (!BarcodeDetectorCtor) return [];
+
+    try {
+      const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
+      const payloads: string[] = [];
+      for (const page of base64Pages) {
+        const image = new Image();
+        const loaded = new Promise<void>((resolve, reject) => {
+          image.onload = () => resolve();
+          image.onerror = () => reject(new Error('QR image load failed'));
+        });
+        image.src = `data:image/jpeg;base64,${page}`;
+        await loaded;
+        const codes = await detector.detect(image);
+        for (const code of codes) {
+          if (code.rawValue) payloads.push(code.rawValue);
+        }
+      }
+      return payloads;
+    } catch (error) {
+      return [];
+    }
+  };
+
+  const validateTotals = (data: InvoiceExtractedData, detectedQrPayloads: string[]) => {
+    const linesTotal = data.items.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0);
+    const calculatedLinesTotal = Number.isFinite(Number(data.calculatedLinesTotal)) ? Number(data.calculatedLinesTotal) : linesTotal;
+    const qrText = detectedQrPayloads[0] || data.qrCodeText;
+    const qrTotal = qrText ? parsePortugueseQrTotal(qrText) : data.qrTotalAmount;
+    const invoiceTotalCents = moneyCents(data.totalInvoiceAmount);
+    const linesTotalCents = moneyCents(calculatedLinesTotal);
+    const qrTotalCents = moneyCents(qrTotal);
+    const notes: string[] = [];
+
+    if (invoiceTotalCents === null) {
+      notes.push('A IA não conseguiu identificar o total final da fatura.');
+    }
+    if (invoiceTotalCents !== null && linesTotalCents !== null && invoiceTotalCents !== linesTotalCents) {
+      notes.push(`Total das linhas ${formatMoney(linesTotalCents)} EUR diferente do total da fatura ${formatMoney(invoiceTotalCents)} EUR.`);
+    }
+    if (invoiceTotalCents !== null && qrTotalCents !== null && invoiceTotalCents !== qrTotalCents) {
+      notes.push(`Total do QR ${formatMoney(qrTotalCents)} EUR diferente do total da fatura ${formatMoney(invoiceTotalCents)} EUR.`);
+    }
+
+    return {
+      data: {
+        ...data,
+        qrCodeText: qrText,
+        qrTotalAmount: qrTotal,
+        calculatedLinesTotal,
+        digitalCompliance: {
+          ...data.digitalCompliance,
+          hasQrCode: data.digitalCompliance.hasQrCode || detectedQrPayloads.length > 0,
+          qrCodeText: qrText,
+          qrTotalAmount: qrTotal,
+          calculatedLinesTotal,
+          totalValidationStatus: notes.length > 0 ? 'ALERTA' as const : 'VALIDO' as const,
+          totalValidationNotes: notes.join(' ')
+        }
+      },
+      notes
+    };
+  };
+
+  const processAllPages = async (currentPages: string[], currentQrPayloads = qrPayloads) => {
     setIsProcessing(true);
     setProcessingError(null);
     try {
@@ -125,15 +207,21 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         return;
       }
 
-      setExtractedData(data);
-      setSupplier(data.supplierName || '');
-      setNif(data.supplierNif || '');
-      setDocNumber(data.invoiceNumber || '');
+      const validation = validateTotals(data, currentQrPayloads);
+      if (validation.notes.length > 0) {
+        setProcessingError(validation.notes.join(' '));
+        return;
+      }
+
+      setExtractedData(validation.data);
+      setSupplier(validation.data.supplierName || '');
+      setNif(validation.data.supplierNif || '');
+      setDocNumber(validation.data.invoiceNumber || '');
       
       const autoMap: Record<number, string> = {};
       const initialFamilies: Record<number, Category> = {};
 
-      data.items.forEach((item, idx) => {
+      validation.data.items.forEach((item, idx) => {
         let family = 'Outros';
         const catLower = (item.category || '').toLowerCase();
         const existingCat = categories.find(c => catLower.includes(c.toLowerCase()) || c.toLowerCase().includes(catLower));
@@ -187,8 +275,11 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         newPages.push(await compressImage(await p));
       }
       const updated = [...pages, ...newPages];
+      const newQrPayloads = await scanQrPayloads(newPages);
+      const updatedQrPayloads = [...qrPayloads, ...newQrPayloads];
       setPages(updated);
-      await processAllPages(updated);
+      setQrPayloads(updatedQrPayloads);
+      await processAllPages(updated, updatedQrPayloads);
     } catch (error) {
       setProcessingError('Não consegui abrir essa fotografia. Tente outro ficheiro ou tire uma nova foto.');
       setIsProcessing(false);
@@ -213,9 +304,12 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
     const captured = canvas.toDataURL('image/jpeg', 0.86).split(',')[1];
     const updated = [...pages, captured];
+    const newQrPayloads = await scanQrPayloads([captured]);
+    const updatedQrPayloads = [...qrPayloads, ...newQrPayloads];
     setPages(updated);
+    setQrPayloads(updatedQrPayloads);
     closeCamera();
-    await processAllPages(updated);
+    await processAllPages(updated, updatedQrPayloads);
   };
 
   const confirmEntry = () => {
@@ -241,6 +335,11 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         totalAmount: extractedData.totalInvoiceAmount,
         customerName: extractedData.customerName,
         customerNif: extractedData.customerNif,
+        qrCodeText: extractedData.qrCodeText || extractedData.digitalCompliance.qrCodeText,
+        qrTotalAmount: extractedData.qrTotalAmount ?? extractedData.digitalCompliance.qrTotalAmount,
+        calculatedLinesTotal: extractedData.calculatedLinesTotal ?? extractedData.digitalCompliance.calculatedLinesTotal,
+        totalValidationStatus: extractedData.digitalCompliance.totalValidationStatus,
+        totalValidationNotes: extractedData.digitalCompliance.totalValidationNotes,
         digitalCompliance: extractedData.digitalCompliance
       });
     }
@@ -274,6 +373,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                         <img src={`data:image/jpeg;base64,${p}`} className="w-full h-full object-cover" />
                         <button onClick={() => {
                           setPages(prev => prev.filter((_, i) => i !== idx));
+                          setQrPayloads(prev => prev.filter((_, i) => i !== idx));
                           setProcessingError(null);
                         }} className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"><X size={14} /></button>
                      </div>
@@ -366,6 +466,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                      <div className="max-w-md">
                        <p className="font-black text-sm text-slate-800 uppercase">Não consegui ler a fatura</p>
                        <p className="text-xs font-bold text-slate-400 mt-2">{processingError || 'A análise terminou sem dados suficientes.'}</p>
+                       <p className="text-[10px] font-bold text-slate-300 mt-3">O total da fatura tem de bater com as linhas e, quando lido, com o total do QR.</p>
                      </div>
                      <div className="flex flex-col sm:flex-row gap-3">
                        <button onClick={() => processAllPages(pages)} disabled={pages.length === 0} className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px] hover:bg-orange-500 disabled:opacity-40 transition-all">

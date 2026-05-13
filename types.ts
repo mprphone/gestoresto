@@ -83,6 +83,11 @@ export interface InvoiceDigitalCompliance {
   imageQualityOk?: boolean;
   complianceNotes?: string;
   isMissingPages?: boolean;
+  qrCodeText?: string;
+  qrTotalAmount?: number;
+  calculatedLinesTotal?: number;
+  totalValidationStatus?: 'VALIDO' | 'ALERTA' | 'NAO_VERIFICADO';
+  totalValidationNotes?: string;
 }
 
 export interface PurchaseInvoiceLine {

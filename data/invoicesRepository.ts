@@ -30,6 +30,11 @@ const invoiceFromDb = (row: any): PurchaseInvoice => ({
     atcud: row.atcud || undefined,
     imageQualityOk: row.image_quality_ok,
     isMissingPages: row.is_missing_pages,
+    qrCodeText: row.qr_code_text || undefined,
+    qrTotalAmount: row.qr_total_amount === null ? undefined : Number(row.qr_total_amount),
+    calculatedLinesTotal: row.calculated_lines_total === null ? undefined : Number(row.calculated_lines_total),
+    totalValidationStatus: row.total_validation_status || undefined,
+    totalValidationNotes: row.total_validation_notes || undefined,
     complianceNotes: row.compliance_notes || undefined
   }
 });
