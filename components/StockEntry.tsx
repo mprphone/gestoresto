@@ -209,7 +209,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     return {
       sharpness,
       brightness: avgBrightness,
-      isReadable: sharpness > 9 && avgBrightness > 80 && avgBrightness < 245,
+      // Relaxed thresholds: white invoice paper can hit near 245 brightness;
+      // sparse-text center areas can have low sharpness but still be readable
+      isReadable: sharpness > 4 && avgBrightness > 60 && avgBrightness < 253,
       hasQrCode
     };
   };
@@ -307,20 +309,45 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     const BarcodeDetectorCtor = (window as any).BarcodeDetector;
     if (!BarcodeDetectorCtor) return [];
 
+    const loadImage = (src: string): Promise<HTMLImageElement> =>
+      new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('img load failed'));
+        img.src = src;
+      });
+
     try {
       const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
       const payloads: string[] = [];
+
       for (const page of base64Pages) {
-        const image = new Image();
-        const loaded = new Promise<void>((resolve, reject) => {
-          image.onload = () => resolve();
-          image.onerror = () => reject(new Error('QR image load failed'));
-        });
-        image.src = `data:image/jpeg;base64,${page}`;
-        await loaded;
-        const codes = await detector.detect(image);
-        for (const code of codes) {
-          if (code.rawValue) payloads.push(code.rawValue);
+        const img = await loadImage(`data:image/jpeg;base64,${page}`);
+
+        // 1st pass: full image
+        const codes = await detector.detect(img);
+        for (const c of codes) if (c.rawValue) payloads.push(c.rawValue);
+        if (payloads.length > 0) continue;
+
+        // 2nd pass: each quadrant upscaled 2× (helps with small QR codes)
+        const qw = Math.round(img.width / 2);
+        const qh = Math.round(img.height / 2);
+        const canvas = document.createElement('canvas');
+        canvas.width = qw * 2;
+        canvas.height = qh * 2;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) continue;
+
+        const quadrants: [number, number][] = [[0, 0], [qw, 0], [0, qh], [qw, qh]];
+        for (const [sx, sy] of quadrants) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, sx, sy, qw, qh, 0, 0, canvas.width, canvas.height);
+          const qImg = await loadImage(canvas.toDataURL('image/jpeg', 0.95));
+          const qCodes = await detector.detect(qImg);
+          for (const c of qCodes) {
+            if (c.rawValue && !payloads.includes(c.rawValue)) payloads.push(c.rawValue);
+          }
+          if (payloads.length > 0) break;
         }
       }
       return payloads;
@@ -405,6 +432,17 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       setSupplier(validation.data.supplierName || '');
       setNif(normalizeNif(validation.data.supplierNif || ''));
       setDocNumber(validation.data.invoiceNumber || '');
+
+      // OCR succeeded → mark all pages as readable; update QR flag from Gemini result
+      const geminiFoundQr = Boolean(validation.data.qrCodeText || validation.data.digitalCompliance?.hasQrCode);
+      setPageQualities((prev: PageQuality[]) => prev.map((q: PageQuality) => ({
+        ...q,
+        isReadable: true,
+        hasQrCode: q.hasQrCode || geminiFoundQr
+      })));
+      if (geminiFoundQr) {
+        setQrPayloads((prev: string[]) => prev.length > 0 ? prev : [validation.data.qrCodeText || '']);
+      }
       
       const autoMap: Record<number, string> = {};
       const createdProducts: Record<string, Product> = {};
