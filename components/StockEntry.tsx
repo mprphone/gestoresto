@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Camera, Upload, Check, X, PlusCircle, RefreshCcw, Copy } from 'lucide-react';
+import jsQR from 'jsqr';
 import { processInvoiceImage, InvoiceExtractedData } from '../geminiService';
 import { Product, Category, Supplier, PurchaseInvoice, ProductAlias, StockEntryLineInput } from '../types';
 
@@ -42,6 +43,13 @@ const parsePortugueseQrTotal = (text: string) => {
 
 const hasVatOnLines = (items: InvoiceExtractedData['items']) =>
   items.some(item => Number(item.vatRate || 0) > 0);
+
+const scanQrFromCanvas = (canvas: HTMLCanvasElement) => {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx || canvas.width === 0 || canvas.height === 0) return undefined;
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  return jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' })?.data;
+};
 
 interface PageQuality {
   sharpness: number;
@@ -100,9 +108,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   useEffect(() => {
     if (!isCameraReady || !isCameraOpen || qrLiveDetected) return;
     const BarcodeDetectorCtor = (window as any).BarcodeDetector;
-    if (!BarcodeDetectorCtor) return;
-
-    const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
+    const detector = BarcodeDetectorCtor ? new BarcodeDetectorCtor({ formats: ['qr_code'] }) : null;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     let active = true;
 
     const scan = async () => {
@@ -110,10 +118,27 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       const video = videoRef.current;
       if (video && video.readyState >= 2) {
         try {
-          const codes = await detector.detect(video);
-          if (codes.length > 0 && codes[0]?.rawValue) {
-            setQrLiveDetected(true); // latch — stop scanning, stay green
-            return;
+          if (detector) {
+            const codes = await detector.detect(video);
+            if (codes.length > 0 && codes[0]?.rawValue) {
+              setQrLiveDetected(true); // latch — stop scanning, stay green
+              return;
+            }
+          }
+          if (ctx) {
+            const sourceWidth = video.videoWidth || 0;
+            const sourceHeight = video.videoHeight || 0;
+            if (sourceWidth > 0 && sourceHeight > 0) {
+              const scanWidth = Math.min(720, sourceWidth);
+              const scanHeight = Math.round(scanWidth * (sourceHeight / sourceWidth));
+              canvas.width = scanWidth;
+              canvas.height = scanHeight;
+              ctx.drawImage(video, 0, 0, scanWidth, scanHeight);
+              if (scanQrFromCanvas(canvas)) {
+                setQrLiveDetected(true);
+                return;
+              }
+            }
           }
         } catch { /* ignore per-frame errors */ }
       }
@@ -343,7 +368,6 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
   const scanQrPayloads = async (base64Pages: string[]) => {
     const BarcodeDetectorCtor = (window as any).BarcodeDetector;
-    if (!BarcodeDetectorCtor) return [];
 
     const loadImage = (src: string): Promise<HTMLImageElement> =>
       new Promise((resolve, reject) => {
@@ -354,15 +378,28 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       });
 
     try {
-      const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
+      const detector = BarcodeDetectorCtor ? new BarcodeDetectorCtor({ formats: ['qr_code'] }) : null;
       const payloads: string[] = [];
+      const addPayload = (value?: string) => {
+        if (value && !payloads.includes(value)) payloads.push(value);
+      };
 
       for (const page of base64Pages) {
         const img = await loadImage(`data:image/jpeg;base64,${page}`);
 
         // 1st pass: full image
-        const codes = await detector.detect(img);
-        for (const c of codes) if (c.rawValue) payloads.push(c.rawValue);
+        if (detector) {
+          const codes = await detector.detect(img);
+          for (const c of codes) addPayload(c.rawValue);
+        }
+        if (payloads.length === 0) {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          ctx?.drawImage(img, 0, 0);
+          addPayload(scanQrFromCanvas(canvas));
+        }
         if (payloads.length > 0) continue;
 
         // 2nd pass: each quadrant upscaled 2× (helps with small QR codes)
@@ -378,11 +415,12 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         for (const [sx, sy] of quadrants) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.drawImage(img, sx, sy, qw, qh, 0, 0, canvas.width, canvas.height);
-          const qImg = await loadImage(canvas.toDataURL('image/jpeg', 0.95));
-          const qCodes = await detector.detect(qImg);
-          for (const c of qCodes) {
-            if (c.rawValue && !payloads.includes(c.rawValue)) payloads.push(c.rawValue);
+          if (detector) {
+            const qImg = await loadImage(canvas.toDataURL('image/jpeg', 0.95));
+            const qCodes = await detector.detect(qImg);
+            for (const c of qCodes) addPayload(c.rawValue);
           }
+          addPayload(scanQrFromCanvas(canvas));
           if (payloads.length > 0) break;
         }
       }
@@ -723,7 +761,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
             <>
               <h4 className="font-black uppercase text-sm">Câmara</h4>
               <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest">
-                {(window as any).BarcodeDetector ? 'QR detetado automaticamente' : 'Enquadre a fatura e fotografe'}
+                QR detetado automaticamente
               </p>
             </>
           )}
@@ -734,7 +772,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       </div>
 
       {/* QR scanner brackets — green when QR is in frame, white while scanning */}
-      {isCameraReady && (window as any).BarcodeDetector && (
+      {isCameraReady && (
         <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center">
           <div className="relative w-64 h-64">
             <span className={`absolute top-0 left-0 w-12 h-12 border-t-4 border-l-4 rounded-tl-xl transition-colors duration-300 ${qrLiveDetected ? 'border-emerald-400' : 'border-white/70'}`} />
