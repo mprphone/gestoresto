@@ -161,7 +161,7 @@ invoicesRouter.post('/', async (req, res, next) => {
         )
         values (
           $1, $2, $3, $4, $5, $6, $7, $8,
-          $9, $10, coalesce($11, current_date), $12, coalesce($13, 'PENDENTE'), coalesce($14, 0), $15,
+          $9, $10, coalesce($11, current_date), $12, coalesce($13::invoice_status, 'PENDENTE'::invoice_status), coalesce($14, 0), $15,
           $16, $17, $18, $19, $20, $21,
           $22, $23, $24, $25, $26,
           $27
@@ -289,7 +289,7 @@ invoicesRouter.post('/', async (req, res, next) => {
 
         await client.query(`
           insert into movements (product_id, invoice_line_id, type, quantity, price, supplier_id, supplier_name, notes)
-          values ($1, $2, 'ENTRADA', $3, $4, $5, $6, $7)
+          values ($1, $2, 'ENTRADA'::movement_type, $3, $4, $5, $6, $7)
         `, [
           line.productId,
           lineResult.rows[0].id,

@@ -43,7 +43,7 @@ movementsRouter.post('/', async (req, res, next) => {
 
       const movement = await client.query(`
         insert into movements (product_id, type, quantity, price, photo_url, notes, supplier_id, supplier_name)
-        values ($1, $2, $3, $4, $5, $6, $7, $8)
+        values ($1, $2::movement_type, $3, $4, $5, $6, $7, $8)
         returning *
       `, [
         payload.productId,

@@ -90,7 +90,7 @@ archiveRouter.post('/upload', upload.single('file'), async (req, res, next) => {
         mime_type, byte_size, sha256, storage_provider, storage_path,
         local_root, page_count, quality_ok, has_qr_code, has_atcud, atcud, notes
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, 'bunker', $9, $10, coalesce($11, 1), $12, $13, $14, $15, $16)
+      values ($1::archive_document_type, $2, $3, $4, $5, $6, $7, $8, 'bunker', $9, $10, coalesce($11, 1), $12, $13, $14, $15, $16)
       on conflict (sha256) where sha256 is not null do update set
         invoice_id = coalesce(excluded.invoice_id, digital_archive_documents.invoice_id),
         payment_id = coalesce(excluded.payment_id, digital_archive_documents.payment_id),
