@@ -633,8 +633,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       )}
 
       {isCameraOpen && (
-        <div className="fixed inset-0 z-[120] bg-slate-950 md:bg-slate-950/90 md:backdrop-blur-sm flex items-stretch md:items-center justify-center md:p-4">
-          <div className="relative w-full h-[100dvh] md:h-auto md:max-w-5xl bg-slate-900 border-white/10 md:border md:rounded-[2rem] overflow-hidden shadow-2xl flex flex-col">
+        <div className="fixed inset-0 z-[120] bg-slate-950 flex items-stretch justify-center">
+          <div className="relative w-screen h-[100dvh] bg-black overflow-hidden flex flex-col">
             <div className="absolute top-0 left-0 right-0 z-10 p-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between text-white bg-gradient-to-b from-black/75 to-transparent">
               <div>
                 <h4 className="font-black uppercase text-sm">Câmara</h4>
@@ -644,7 +644,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                 <X size={20} />
               </button>
             </div>
-            <div className="bg-black flex-1 min-h-0 md:aspect-video md:flex-none">
+            <div className="bg-black flex-1 min-h-0">
               <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
             </div>
             {cameraError && <p className="absolute left-4 right-4 bottom-28 z-10 p-3 rounded-2xl bg-red-500/90 text-xs font-bold text-white">{cameraError}</p>}
