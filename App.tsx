@@ -24,12 +24,14 @@ import SystemNotice from './components/SystemNotice';
 import RestaurantSettings from './components/RestaurantSettings';
 import LoginScreen from './components/LoginScreen';
 import EmployeesManagement from './components/EmployeesManagement';
-import { 
-  LayoutDashboard, 
-  Package, 
-  PlusCircle, 
-  ArrowRightLeft, 
-  BarChart3, 
+import InvoiceReview from './components/InvoiceReview';
+import { listPendingInvoices, subscribePush, getVapidPublicKey } from './data/reviewRepository';
+import {
+  LayoutDashboard,
+  Package,
+  PlusCircle,
+  ArrowRightLeft,
+  BarChart3,
   UtensilsCrossed,
   BookOpen,
   Building2,
@@ -37,7 +39,8 @@ import {
   Link2,
   Store,
   Users,
-  LogOut
+  LogOut,
+  ClipboardCheck
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -57,9 +60,10 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : null;
   });
   const isFuncionario = currentUser?.role === 'funcionario';
-  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'restaurant' | 'employees'>(() =>
+  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'restaurant' | 'employees' | 'review'>(() =>
     currentUser?.role === 'funcionario' ? 'entry' : 'dash'
   );
+  const [pendingReviewCount, setPendingReviewCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
@@ -103,15 +107,51 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!currentUser) {
-      setIsLoading(false);
-      return;
-    }
+    if (!currentUser) { setIsLoading(false); return; }
     setIsLoading(true);
     refreshData()
       .catch(error => setLoadError(error.message || 'Falha ao carregar dados'))
       .finally(() => setIsLoading(false));
   }, [currentUser]);
+
+  // Service worker + push subscription (admins only)
+  useEffect(() => {
+    if (!currentUser || isFuncionario) return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    navigator.serviceWorker.register('/sw.js').then(async reg => {
+      // Handle notification click → navigate to review tab
+      navigator.serviceWorker.addEventListener('message', e => {
+        if (e.data?.type === 'navigate' && e.data.url?.includes('review')) setActiveTab('review');
+      });
+
+      // Request permission and subscribe
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') return;
+
+      try {
+        const publicKey = await getVapidPublicKey();
+        if (!publicKey) return;
+        const existing = await reg.pushManager.getSubscription();
+        const sub = existing || await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: publicKey
+        });
+        await subscribePush(sub, currentUser.id);
+      } catch (e) {
+        console.warn('Push subscribe failed:', e);
+      }
+    }).catch(e => console.warn('SW register failed:', e));
+  }, [currentUser?.id]);
+
+  // Poll pending review count for badge (admins only, every 60s)
+  useEffect(() => {
+    if (!currentUser || isFuncionario) return;
+    const refresh = () => listPendingInvoices().then(list => setPendingReviewCount(list.length)).catch(() => {});
+    refresh();
+    const interval = setInterval(refresh, 60_000);
+    return () => clearInterval(interval);
+  }, [currentUser?.id]);
 
   const handleLogin = async (email: string, password: string) => {
     const user = await login(email, password);
@@ -342,6 +382,7 @@ const App: React.FC = () => {
             <NavItem icon={<ArrowRightLeft />} label="Saída / Quebra" active={activeTab === 'move'} onClick={() => setActiveTab('move')} />
             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-8 mb-2 px-5 text-center">Gestão IA</p>
             <NavItem icon={<PlusCircle />} label="Nova Fatura" active={activeTab === 'entry'} onClick={() => setActiveTab('entry')} />
+            <NavItem icon={<ClipboardCheck />} label="Rever Faturas" active={activeTab === 'review'} onClick={() => setActiveTab('review')} badge={pendingReviewCount} />
             <NavItem icon={<Wallet />} label="Pagamentos" active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} />
             <NavItem icon={<Building2 />} label="Fornecedores" active={activeTab === 'suppliers'} onClick={() => setActiveTab('suppliers')} />
             <NavItem icon={<Store />} label="Restaurante" active={activeTab === 'restaurant'} onClick={() => setActiveTab('restaurant')} />
@@ -377,6 +418,7 @@ const App: React.FC = () => {
           {!isLoading && !loadError && <>
           {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} productAliases={productAliases} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} />}
           {activeTab === 'move' && <StockMovement products={products} movements={movements} onTransfer={handleStockMovement} categories={categories} hideStock={isFuncionario} />}
+          {activeTab === 'review' && currentUser && <InvoiceReview currentUser={currentUser} onReviewed={() => setPendingReviewCount(c => Math.max(0, c - 1))} />}
           {!isFuncionario && <>
             {activeTab === 'dash' && <Dashboard products={products} movements={movements} />}
             {activeTab === 'inv' && <InventoryList products={products} movements={movements} categories={categories} onUpdateProduct={handleUpdateProduct} />}
@@ -431,10 +473,11 @@ const App: React.FC = () => {
   );
 };
 
-const NavItem = ({ icon, label, active, onClick }: any) => (
+const NavItem = ({ icon, label, active, onClick, badge }: any) => (
   <button onClick={onClick} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${active ? 'bg-orange-500 text-white shadow-xl' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
     {React.cloneElement(icon as React.ReactElement, { size: 22 })}
-    <span>{label}</span>
+    <span className="flex-1 text-left">{label}</span>
+    {badge > 0 && <span className="min-w-[22px] h-[22px] bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center px-1">{badge}</span>}
   </button>
 );
 

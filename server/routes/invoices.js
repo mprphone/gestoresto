@@ -8,6 +8,7 @@ import { pageRange, pageResult } from '../pagination.js';
 import { audit } from '../audit.js';
 import { config } from '../config.js';
 import { sendTrackedEmail } from '../emailService.js';
+import { notifyAdmins } from '../pushService.js';
 
 export const invoicesRouter = Router();
 
@@ -572,6 +573,14 @@ invoicesRouter.post('/', async (req, res, next) => {
           relatedEntityId: invoiceId
         });
       }
+      // Push notification to all admin users
+      notifyAdmins({
+        type: 'new_invoice',
+        title: '📄 Nova Fatura Registada',
+        body: `${payload.supplierName || 'Fornecedor'} · ${payload.docNumber || 'S/N'} · €${Number(payload.totalAmount || 0).toFixed(2)}`,
+        invoiceId
+      }).catch(err => console.error('Push notify error:', err));
+
       return { invoice: invoice.rows[0], lines, archiveDocument, pdfDocument, jsonDocument };
     });
     res.status(201).json(saved);

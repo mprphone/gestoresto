@@ -15,6 +15,8 @@ import { reportsRouter } from './routes/reports.js';
 import { emailsRouter } from './routes/emails.js';
 import { restaurantProfileRouter } from './routes/restaurantProfile.js';
 import { geminiRouter } from './routes/gemini.js';
+import { pushRouter } from './routes/push.js';
+import { reviewRouter } from './routes/review.js';
 
 const app = express();
 
@@ -71,6 +73,8 @@ app.use('/api/reports', reportsRouter);
 app.use('/api/emails', emailsRouter);
 app.use('/api/restaurant-profile', restaurantProfileRouter);
 app.use('/api/gemini', geminiRouter);
+app.use('/api/push', pushRouter);
+app.use('/api/review', reviewRouter);
 
 app.use((error, _req, res, _next) => {
   console.error(error);

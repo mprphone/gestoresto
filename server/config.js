@@ -7,6 +7,11 @@ export const config = {
   port: Number(process.env.API_PORT || 8790),
   geminiApiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-05-20',
+  vapid: {
+    publicKey: process.env.VAPID_PUBLIC_KEY || '',
+    privateKey: process.env.VAPID_PRIVATE_KEY || '',
+    subject: process.env.VAPID_SUBJECT || 'mailto:admin@gestoresto.app'
+  },
   databaseUrl: process.env.DATABASE_URL || '',
   databaseName: process.env.PGDATABASE || 'gestoresto',
   databaseUser: process.env.PGUSER || process.env.USER || 'ubuntu',
