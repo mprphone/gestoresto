@@ -30,6 +30,13 @@ export async function getRestaurantProfile(): Promise<RestaurantProfile | null> 
 }
 
 export async function saveRestaurantProfile(profile: RestaurantProfile): Promise<RestaurantProfile> {
-  const result = await apiPost<any>('/api/restaurant-profile', profile);
-  return fromDb(result) as RestaurantProfile;
+  try {
+    const result = await apiPost<any>('/api/restaurant-profile', profile);
+    return fromDb(result) as RestaurantProfile;
+  } catch (error: any) {
+    if (String(error?.message || '').includes('Cannot POST /api/restaurant-profile')) {
+      throw new Error('A API do servidor ainda não foi atualizada com a rota do restaurante. Atualize/reinicie a API em gestoresto.mpr.pt e tente novamente.');
+    }
+    throw error;
+  }
 }
