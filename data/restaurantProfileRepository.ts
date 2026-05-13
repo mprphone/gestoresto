@@ -18,8 +18,15 @@ const fromDb = (row: any): RestaurantProfile | null => {
 };
 
 export async function getRestaurantProfile(): Promise<RestaurantProfile | null> {
-  const result = await apiGet<{ data: any | null }>('/api/restaurant-profile');
-  return fromDb(result.data);
+  try {
+    const result = await apiGet<{ data: any | null }>('/api/restaurant-profile');
+    return fromDb(result.data);
+  } catch (error: any) {
+    if (String(error?.message || '').includes('Cannot GET /api/restaurant-profile')) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export async function saveRestaurantProfile(profile: RestaurantProfile): Promise<RestaurantProfile> {
