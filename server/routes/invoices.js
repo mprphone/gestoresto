@@ -309,28 +309,6 @@ function isCreditNote(payload) {
     Number(payload.totalAmount || 0) < 0;
 }
 
-async function assertCreditStockAvailable(client, payload, restaurantId) {
-  for (const line of (payload.lines || [])) {
-    if (!line.productId) continue;
-    const quantityStock = Math.abs(Number(line.quantityStock || 0));
-    if (quantityStock <= 0) continue;
-    const productResult = await client.query(
-      'select id, name, current_stock, unit from products where id = $1 and restaurant_id = $2 for update',
-      [line.productId, restaurantId]
-    );
-    const product = productResult.rows[0];
-    if (!product) continue;
-    const currentStock = Number(product.current_stock || 0);
-    if (currentStock < quantityStock) {
-      const error = new Error(
-        `Stock insuficiente para nota de crédito: ${product.name} tem ${currentStock.toFixed(3)} ${product.unit || ''} e a nota tenta abater ${quantityStock.toFixed(3)} ${line.unitStock || product.unit || ''}.`
-      );
-      error.statusCode = 422;
-      throw error;
-    }
-  }
-}
-
 invoicesRouter.post('/', async (req, res, next) => {
   try {
     const payload = req.body;
@@ -360,7 +338,6 @@ invoicesRouter.post('/', async (req, res, next) => {
         throw error;
       }
       await assertNotDuplicateInvoice(client, payload, req.restaurantId);
-      if (isCredit) await assertCreditStockAvailable(client, payload, req.restaurantId);
       let supplierId = payload.supplierId || null;
       if (!supplierId && payload.supplierNif) {
         const normalizedSupplierNif = onlyDigits(payload.supplierNif);
@@ -565,17 +542,29 @@ invoicesRouter.post('/', async (req, res, next) => {
           const currentValue = currentStock * averagePrice;
           const incomingValue = Number(line.quantityOriginal || 0) * unitPrice;
           const totalStock = currentStock + quantityStock;
+          const stockDeficit = totalStock < 0 ? Math.abs(totalStock) : 0;
+          const nextStock = Math.max(0, totalStock);
           const newAveragePrice = quantityStock < 0
             ? averagePrice
-            : (totalStock > 0 ? (currentValue + incomingValue) / totalStock : unitPrice);
+            : (nextStock > 0 ? (currentValue + incomingValue) / nextStock : unitPrice);
+          const stockCorrectionNote = stockDeficit > 0
+            ? `Pendente correção: nota de crédito tentou abater ${Math.abs(quantityStock).toFixed(3)} ${line.unitStock || product.unit || ''}, mas só existiam ${currentStock.toFixed(3)} ${product.unit || ''}. Diferença ${stockDeficit.toFixed(3)} ${line.unitStock || product.unit || ''}.`
+            : null;
 
           const productAfter = await client.query(`
             update products
             set current_stock = $1, average_price = $2
             where id = $3 and restaurant_id = $4
             returning *
-          `, [totalStock, newAveragePrice, line.productId, req.restaurantId]);
+          `, [nextStock, newAveragePrice, line.productId, req.restaurantId]);
           await audit(client, req, 'update_stock', 'products', line.productId, product, productAfter.rows[0]);
+          if (stockCorrectionNote) {
+            line.notes = [line.notes, stockCorrectionNote].filter(Boolean).join(' ');
+            await client.query(
+              'update purchase_invoice_lines set notes = $1 where id = $2',
+              [line.notes, lineResult.rows[0].id]
+            );
+          }
         }
 
         if (line.originalName && line.productId) {
@@ -659,6 +648,12 @@ invoicesRouter.post('/', async (req, res, next) => {
           }
         }
 
+        const movementNotes = [
+          isCredit
+            ? `Nota de Crédito ${payload.docNumber || ''}`
+            : `Entrada via Fatura ${payload.docNumber || ''}`,
+          line.notes
+        ].filter(Boolean).join(' · ');
         await client.query(`
           insert into movements (restaurant_id, product_id, invoice_line_id, type, quantity, price, supplier_id, supplier_name, notes)
           values ($1, $2, $3, 'ENTRADA'::movement_type, $4, $5, $6, $7, $8)
@@ -670,9 +665,7 @@ invoicesRouter.post('/', async (req, res, next) => {
           line.unitPrice,
           supplierId,
           payload.supplierName,
-          isCredit
-            ? `Nota de Crédito ${payload.docNumber || ''}`
-            : `Entrada via Fatura ${payload.docNumber || ''}`
+          movementNotes
         ]);
       }
 
