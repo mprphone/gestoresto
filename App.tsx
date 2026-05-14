@@ -209,6 +209,15 @@ const App: React.FC = () => {
     setActiveTab('dash');
   };
 
+  const handleEnterRestaurantStock = async (restaurant: Restaurant) => {
+    if (!currentUser) return;
+    let selected = restaurant;
+    try { selected = await switchRestaurant(currentUser.id, restaurant.id); } catch { /* ignore */ }
+    setCurrentRestaurant(selected);
+    setAuthRestaurant(restaurant.id);
+    setActiveTab('inv');
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('gestoresto_user');
     localStorage.removeItem('gestoresto_restaurant_id');
@@ -453,7 +462,7 @@ const App: React.FC = () => {
           </div>
         </header>
         <main className="p-6 md:p-10">
-          <CompanyAdmin />
+          <CompanyAdmin onEnterRestaurant={handleEnterRestaurantStock} />
         </main>
       </div>
     );
@@ -467,6 +476,9 @@ const App: React.FC = () => {
           <UtensilsCrossed className="text-orange-500 w-8 h-8" />
           <div className="min-w-0">
             <h1 className="font-black text-2xl tracking-tighter uppercase italic">GestoRestô</h1>
+            {currentRestaurant.companyName && currentRestaurant.companyName !== currentRestaurant.name && (
+              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest truncate">{currentRestaurant.companyName}</p>
+            )}
             <p className="text-[10px] font-black text-orange-400 uppercase tracking-widest truncate">{currentRestaurant.name}</p>
           </div>
         </div>
@@ -506,6 +518,12 @@ const App: React.FC = () => {
             {activeTab === 'entry' ? "Entrada IA no Stock" : activeTab.toUpperCase()}
           </h2>
           <div className="flex items-center gap-3">
+            <div className="hidden sm:block text-right">
+              {currentRestaurant.companyName && currentRestaurant.companyName !== currentRestaurant.name && (
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Empresa: {currentRestaurant.companyName}</p>
+              )}
+              <p className="text-[10px] font-black text-orange-500 uppercase tracking-widest">Restaurante: {currentRestaurant.name}</p>
+            </div>
             {!isFuncionario && <AlertsPanel products={products} batches={[]} invoices={invoices} restaurantProfile={restaurantProfile} />}
             <UserMenu
               user={currentUser}

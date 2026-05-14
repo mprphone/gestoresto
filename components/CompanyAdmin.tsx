@@ -266,8 +266,9 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
 interface CompanyDetailProps {
   company: Company;
   onBack: () => void;
+  onEnterRestaurant?: (restaurant: Restaurant) => void;
 }
-const CompanyDetail: React.FC<CompanyDetailProps> = ({ company, onBack }) => {
+const CompanyDetail: React.FC<CompanyDetailProps> = ({ company, onBack, onEnterRestaurant }) => {
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
@@ -341,18 +342,26 @@ const CompanyDetail: React.FC<CompanyDetailProps> = ({ company, onBack }) => {
           {/* Restaurant cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {restaurants.map(r => (
-              <button key={r.id} onClick={() => setSelectedRestaurant(r)}
-                className="group bg-white border border-slate-200 rounded-[2rem] p-6 text-left hover:border-orange-300 hover:shadow-lg transition-all active:scale-95">
+              <div key={r.id} onClick={() => onEnterRestaurant?.(r)}
+                className="group bg-white border border-slate-200 rounded-[2rem] p-6 text-left hover:border-orange-300 hover:shadow-lg transition-all active:scale-95 cursor-pointer">
                 <div className="flex items-start justify-between mb-4">
                   <div className="p-3 rounded-2xl bg-orange-50 text-orange-500 group-hover:bg-orange-500 group-hover:text-white transition-colors">
                     <Store size={22} />
                   </div>
-                  <ChevronRight size={16} className="text-slate-300 group-hover:text-orange-400 mt-1 transition-colors" />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(event) => { event.stopPropagation(); setSelectedRestaurant(r); }}
+                      className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-[10px] font-black text-slate-500 uppercase hover:border-orange-300 hover:text-orange-500 transition-all flex items-center gap-1.5"
+                    >
+                      <Pencil size={12} /> Editar
+                    </button>
+                    <ChevronRight size={16} className="text-slate-300 group-hover:text-orange-400 transition-colors" />
+                  </div>
                 </div>
                 <h3 className="font-black text-slate-900 text-lg leading-tight">{r.name}</h3>
                 {r.nif && <p className="text-[10px] font-bold text-slate-400 mt-1">NIF {r.nif}</p>}
-                <p className="text-[9px] font-black text-orange-500 uppercase mt-3 tracking-widest">Clique para editar →</p>
-              </button>
+                <p className="text-[9px] font-black text-orange-500 uppercase mt-3 tracking-widest">Entrar no stock</p>
+              </div>
             ))}
 
             {/* New restaurant card */}
@@ -396,7 +405,11 @@ const CompanyDetail: React.FC<CompanyDetailProps> = ({ company, onBack }) => {
 };
 
 // ── Level 1: Company list ─────────────────────────────────────────────────────
-const CompanyAdmin: React.FC = () => {
+interface CompanyAdminProps {
+  onEnterRestaurant?: (restaurant: Restaurant) => void;
+}
+
+const CompanyAdmin: React.FC<CompanyAdminProps> = ({ onEnterRestaurant }) => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -428,6 +441,23 @@ const CompanyAdmin: React.FC = () => {
     finally { setSaving(false); }
   };
 
+  const enterCompany = async (company: Company) => {
+    setError(null);
+    try {
+      const restaurants = (await listRestaurants()).filter(r => r.companyId === company.id);
+      if (restaurants.length === 1 && onEnterRestaurant) {
+        onEnterRestaurant(restaurants[0]);
+        return;
+      }
+      setSelectedCompany(company);
+      if (restaurants.length === 0) {
+        setError('Esta empresa ainda não tem nenhum estabelecimento para abrir stock.');
+      }
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
   const startEdit = (company: Company) => {
     setEditingCompany(company);
     setEditName(company.name);
@@ -454,6 +484,7 @@ const CompanyAdmin: React.FC = () => {
         <CompanyDetail
           company={selectedCompany}
           onBack={() => setSelectedCompany(null)}
+          onEnterRestaurant={onEnterRestaurant}
         />
       </div>
     );
@@ -481,7 +512,7 @@ const CompanyAdmin: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {companies.map(company => (
             <div key={company.id}
-              onClick={() => setSelectedCompany(company)}
+              onClick={() => enterCompany(company)}
               className="group bg-white border border-slate-200 rounded-[2rem] p-8 text-left hover:border-orange-300 hover:shadow-xl transition-all active:scale-95 cursor-pointer">
               <div className="flex items-start justify-between gap-3 mb-6">
                 <div className="p-4 rounded-2xl bg-slate-900 text-white group-hover:bg-orange-500 transition-colors shrink-0">
@@ -502,7 +533,9 @@ const CompanyAdmin: React.FC = () => {
               <p className="text-[9px] font-black text-slate-400 mt-3 uppercase tracking-widest">
                 {company.restaurantCount ?? 0} estabelecimento{(company.restaurantCount ?? 0) !== 1 ? 's' : ''}
               </p>
-              <p className="text-[9px] font-black text-orange-500 mt-5 uppercase tracking-widest">Entrar na empresa</p>
+              <p className="text-[9px] font-black text-orange-500 mt-5 uppercase tracking-widest">
+                {(company.restaurantCount ?? 0) === 1 ? 'Entrar no stock' : 'Escolher estabelecimento'}
+              </p>
             </div>
           ))}
 
