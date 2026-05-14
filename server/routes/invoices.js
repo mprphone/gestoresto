@@ -551,24 +551,31 @@ invoicesRouter.post('/', async (req, res, next) => {
       }
 
       await audit(client, req, 'create', 'purchase_invoices', invoiceId, null, { ...invoice.rows[0], lines });
-      if (config.invoiceOkEmailTo) {
-        const invoiceAttachments = pdfDocument?.storage_path
-          ? [{
-              filename: pdfDocument.original_filename || `${invoiceBaseName(invoice.rows[0], payload)}.pdf`,
-              path: pdfDocument.storage_path,
-              contentType: 'application/pdf'
-            }]
-          : archiveDocuments
-              .filter(doc => doc.storage_path)
-              .map((doc, index) => ({
-                filename: doc.original_filename || `fatura-${payload.docNumber || invoiceId}-pag-${index + 1}.jpg`,
-                path: doc.storage_path,
-                contentType: doc.mime_type || undefined
-              }));
-        await sendTrackedEmail(client, req, {
-          recipient: config.invoiceOkEmailTo,
-          subject: `Fatura registada: ${payload.docNumber || 'S/N'} - ${payload.supplierName || 'Fornecedor'}`,
-          body: [
+      {
+        // Fetch notification emails from restaurant profile; fall back to config
+        const profileResult = await client.query(`
+          select notification_emails from restaurant_profile where is_active = true limit 1
+        `);
+        const profileEmails = profileResult.rows[0]?.notification_emails || [];
+        const recipients = profileEmails.length > 0
+          ? profileEmails
+          : (config.invoiceOkEmailTo ? [config.invoiceOkEmailTo] : []);
+
+        if (recipients.length > 0) {
+          const invoiceAttachments = pdfDocument?.storage_path
+            ? [{
+                filename: pdfDocument.original_filename || `${invoiceBaseName(invoice.rows[0], payload)}.pdf`,
+                path: pdfDocument.storage_path,
+                contentType: 'application/pdf'
+              }]
+            : archiveDocuments
+                .filter(doc => doc.storage_path)
+                .map((doc, index) => ({
+                  filename: doc.original_filename || `fatura-${payload.docNumber || invoiceId}-pag-${index + 1}.jpg`,
+                  path: doc.storage_path,
+                  contentType: doc.mime_type || undefined
+                }));
+          const emailBody = [
             'Foi registada uma fatura no GestoResto.',
             '',
             `Fornecedor: ${payload.supplierName || '-'}`,
@@ -580,11 +587,19 @@ invoicesRouter.post('/', async (req, res, next) => {
             `Arquivo original: ${archiveDocument?.public_url || invoice.rows[0].photo_url || 'Sem URL'}`,
             '',
             'Estado: fatura guardada com sucesso.'
-          ].join('\n'),
-          attachments: invoiceAttachments,
-          relatedEntityTable: 'purchase_invoices',
-          relatedEntityId: invoiceId
-        });
+          ].join('\n');
+          const emailSubject = `Fatura registada: ${payload.docNumber || 'S/N'} - ${payload.supplierName || 'Fornecedor'}`;
+          for (const recipient of recipients) {
+            await sendTrackedEmail(client, req, {
+              recipient,
+              subject: emailSubject,
+              body: emailBody,
+              attachments: invoiceAttachments,
+              relatedEntityTable: 'purchase_invoices',
+              relatedEntityId: invoiceId
+            });
+          }
+        }
       }
       // Push notification to all admin users
       notifyAdmins({
