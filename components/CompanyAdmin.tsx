@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, Store, Users, Plus, X, Check, ChevronLeft, ChevronRight, Mail, Hash, Save, Pencil } from 'lucide-react';
+import { Building2, Store, Users, Plus, X, Check, ChevronLeft, ChevronRight, Mail, Hash, Save, Pencil, UserPlus, UserCheck } from 'lucide-react';
 import { Company, Restaurant, AppUser } from '../types';
 import {
   listCompanies, createCompany,
@@ -7,6 +7,7 @@ import {
   listRestaurantUsers, listAvailableUsers,
   addUserToRestaurant, removeUserFromRestaurant
 } from '../data/companiesRepository';
+import { saveUser } from '../data/authRepository';
 
 const ROLES = [
   { value: 'admin',       label: 'Admin' },
@@ -34,6 +35,8 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
   const [selUser, setSelUser] = useState('');
   const [selRole, setSelRole] = useState('funcionario');
   const [addingUser, setAddingUser] = useState(false);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'funcionario' });
 
   useEffect(() => {
     setDraft(restaurant);
@@ -61,12 +64,30 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
     setEmailInput('');
   };
 
+  const reloadUsers = async () => {
+    const [u, av] = await Promise.all([listRestaurantUsers(restaurant.id), listAvailableUsers(restaurant.id)]);
+    setUsers(u); setAvailable(av);
+  };
+
   const doAddUser = async () => {
     if (!selUser) return;
     await addUserToRestaurant(restaurant.id, selUser, selRole);
-    const [u, av] = await Promise.all([listRestaurantUsers(restaurant.id), listAvailableUsers(restaurant.id)]);
-    setUsers(u); setAvailable(av);
+    await reloadUsers();
     setAddingUser(false); setSelUser(''); setSelRole('funcionario');
+  };
+
+  const doCreateUser = async () => {
+    if (!newUser.name.trim() || !newUser.email.trim() || !newUser.password.trim()) return;
+    const created = await saveUser({ name: newUser.name, email: newUser.email, password: newUser.password, role: newUser.role as any, isActive: true });
+    await addUserToRestaurant(restaurant.id, created.id, newUser.role);
+    await reloadUsers();
+    setCreatingUser(false);
+    setNewUser({ name: '', email: '', password: '', role: 'funcionario' });
+  };
+
+  const doChangeRole = async (userId: string, role: string) => {
+    await addUserToRestaurant(restaurant.id, userId, role);
+    setUsers(prev => prev.map(u => u.id === userId ? { ...u, accessRole: role } : u));
   };
 
   const doRemoveUser = async (userId: string) => {
@@ -149,18 +170,26 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-black text-slate-900 truncate">{u.name}</p>
-                  <p className="text-[9px] font-bold text-slate-400 truncate">{u.email} · <span className="capitalize">{u.accessRole}</span></p>
+                  <p className="text-[9px] font-bold text-slate-400 truncate">{u.email}</p>
                 </div>
-                <button onClick={() => doRemoveUser(u.id)} className="p-1.5 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"><X size={14} /></button>
+                <select
+                  value={u.accessRole}
+                  onChange={e => doChangeRole(u.id, e.target.value)}
+                  className="text-[10px] font-bold border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-600 outline-none focus:ring-2 focus:ring-orange-500/20"
+                >
+                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+                <button onClick={() => doRemoveUser(u.id)} className="p-1.5 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50 shrink-0"><X size={14} /></button>
               </div>
             ))}
             {users.length === 0 && <p className="text-xs text-slate-400 font-bold italic">Nenhum utilizador atribuído.</p>}
           </div>
 
-          {addingUser ? (
+          {/* Add existing user */}
+          {addingUser && (
             <div className="flex gap-2 flex-wrap items-end p-4 bg-slate-50 rounded-2xl border border-slate-200">
               <div className="flex-1 min-w-0 space-y-1">
-                <span className="text-[9px] font-black text-slate-400 uppercase">Utilizador</span>
+                <span className="text-[9px] font-black text-slate-400 uppercase">Utilizador existente</span>
                 <select value={selUser} onChange={e => setSelUser(e.target.value)}
                   className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none">
                   <option value="">Selecionar...</option>
@@ -180,14 +209,50 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
               </button>
               <button onClick={() => setAddingUser(false)} className="p-2.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-all"><X size={14} /></button>
             </div>
-          ) : (
-            available.length > 0 && (
-              <button onClick={() => setAddingUser(true)}
-                className="flex items-center gap-2 text-xs font-black text-slate-400 hover:text-orange-500 transition-colors uppercase">
-                <div className="p-1 rounded-lg bg-slate-100 hover:bg-orange-100 transition-colors"><Plus size={12} /></div>
-                Adicionar utilizador
+          )}
+
+          {/* Create new user */}
+          {creatingUser && (
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+              <p className="text-[9px] font-black text-slate-400 uppercase">Novo utilizador</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input placeholder="Nome completo" value={newUser.name} onChange={e => setNewUser(d => ({ ...d, name: e.target.value }))}
+                  className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/20" />
+                <input placeholder="Email" type="email" value={newUser.email} onChange={e => setNewUser(d => ({ ...d, email: e.target.value }))}
+                  className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/20" />
+                <input placeholder="Password inicial" type="password" value={newUser.password} onChange={e => setNewUser(d => ({ ...d, password: e.target.value }))}
+                  className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/20" />
+                <select value={newUser.role} onChange={e => setNewUser(d => ({ ...d, role: e.target.value }))}
+                  className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/20">
+                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={doCreateUser} disabled={!newUser.name.trim() || !newUser.email.trim() || !newUser.password.trim()}
+                  className="px-4 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-black hover:bg-emerald-600 disabled:opacity-40 flex items-center gap-2 transition-all">
+                  <Check size={13} /> Criar e adicionar
+                </button>
+                <button onClick={() => setCreatingUser(false)} className="p-2.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-all"><X size={14} /></button>
+              </div>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          {!addingUser && !creatingUser && (
+            <div className="flex gap-3 flex-wrap">
+              {available.length > 0 && (
+                <button onClick={() => setAddingUser(true)}
+                  className="flex items-center gap-2 text-xs font-black text-slate-400 hover:text-orange-500 transition-colors">
+                  <div className="p-1.5 rounded-lg bg-slate-100 hover:bg-orange-100 transition-colors"><UserCheck size={12} /></div>
+                  Associar utilizador
+                </button>
+              )}
+              <button onClick={() => setCreatingUser(true)}
+                className="flex items-center gap-2 text-xs font-black text-slate-400 hover:text-orange-500 transition-colors">
+                <div className="p-1.5 rounded-lg bg-slate-100 hover:bg-orange-100 transition-colors"><UserPlus size={12} /></div>
+                Criar utilizador
               </button>
-            )
+            </div>
           )}
         </section>
       </div>
