@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Camera, Upload, Check, X, PlusCircle, RefreshCcw, Copy } from 'lucide-react';
 import { processInvoiceImage, InvoiceExtractedData } from '../geminiService';
 import { Product, Category, Supplier, PurchaseInvoice, ProductAlias, StockEntryLineInput, RestaurantProfile } from '../types';
-import { normalizeInvoiceImage, normalizeWithoutCrop, detectDocumentCrop, CropProposal, PageQuality, PortugueseQrData, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads, validateInvoiceTotals } from './stock-entry/invoiceProcessor';
+import { normalizeInvoiceImage, normalizeWithoutCrop, detectDocumentCrop, CropProposal, PageQuality, PortugueseQrData, normalizePortugueseDocumentType, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads, validateInvoiceTotals } from './stock-entry/invoiceProcessor';
 import { buildProductMatches, confidenceStyle, normalizeNif } from './stock-entry/productMatcher';
 
 interface StockEntryProps {
@@ -523,8 +523,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       });
       const sourcePages = originalPages.length > 0 ? originalPages : pages.map(page => `data:image/jpeg;base64,${page}`);
       const invoicePhotos = sourcePages.map(page => page.startsWith('data:') ? page : `data:image/jpeg;base64,${page}`);
+      const documentType = normalizePortugueseDocumentType(qrData?.documentType, extractedData.documentType, qrData?.documentNumber, extractedData.invoiceNumber);
       onComplete(itemsToSubmit, invoicePhotos[0], { name: supplier, nif }, {
         docNumber,
+        documentType,
         dateIssued: qrData?.documentDate,
         totalAmount: extractedData.totalInvoiceAmount,
         customerName: extractedData.customerName,
@@ -724,6 +726,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
   const matchedItemsCount = extractedData ? extractedData.items.filter((_, idx) => mapping[idx]).length : 0;
   const totalItemsCount = extractedData?.items.length || 0;
+  const currentDocumentType = extractedData
+    ? normalizePortugueseDocumentType(qrData?.documentType, extractedData.documentType, qrData?.documentNumber, extractedData.invoiceNumber)
+    : normalizePortugueseDocumentType(qrData?.documentType, qrData?.documentNumber);
+  const isCreditDocument = currentDocumentType === 'NC';
 
   return (
     <div className="max-w-6xl mx-auto space-y-4 sm:space-y-6 pb-28 sm:pb-20">
@@ -866,6 +872,21 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                         </div>
                       </div>
                     )}
+                    {currentDocumentType && (
+                      <div className={`p-4 rounded-2xl border ${isCreditDocument ? 'bg-red-50 border-red-200 text-red-700' : 'bg-slate-50 border-slate-100 text-slate-700'}`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest">Tipo de documento</p>
+                            <p className="text-[10px] font-bold opacity-80 mt-1">
+                              {isCreditDocument ? 'Nota de crédito detetada. Ao confirmar, o stock será abatido.' : 'Tipo detetado por QR/OCR/número do documento.'}
+                            </p>
+                          </div>
+                          <span className={`px-3 py-1.5 rounded-xl text-sm font-black ${isCreditDocument ? 'bg-red-100 text-red-700' : 'bg-white text-slate-900 border border-slate-200'}`}>
+                            {currentDocumentType}
+                          </span>
+                        </div>
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6">
                        <div className="space-y-1"><label className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Fornecedor</label><input type="text" className="w-full px-4 sm:px-5 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs" value={supplier} onChange={(e) => setSupplier(e.target.value)} /></div>
                        <div className="space-y-1"><label className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">NIF</label><input type="text" className="w-full px-4 sm:px-5 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs" value={nif} onChange={(e) => setNif(e.target.value)} /></div>
@@ -947,7 +968,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                     </div>
                     <div className="sticky bottom-0 z-30 -mx-4 -mb-4 sm:mx-0 sm:mb-0 p-4 sm:p-0 bg-white/95 sm:bg-transparent backdrop-blur border-t sm:border-t pt-4 sm:pt-8 flex flex-col md:flex-row justify-between items-center gap-3 sm:gap-6">
                        <div className="hidden sm:block"><p className="text-[10px] font-black text-slate-400 uppercase">Total do Documento</p><p className="text-4xl font-black italic text-slate-900">€ {extractedData.totalInvoiceAmount.toFixed(2)}</p></div>
-                       <button onClick={confirmEntry} className={`w-full md:w-auto px-8 sm:px-12 py-4 sm:py-5 rounded-2xl sm:rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate || nifMismatch ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-orange-500 text-white hover:bg-orange-600 sm:bg-slate-900 sm:hover:bg-orange-500'}`} disabled={!!(isDuplicate || nifMismatch)}>Confirmar Entrada <Check size={20} className="inline ml-2" /></button>
+                       <button onClick={confirmEntry} className={`w-full md:w-auto px-8 sm:px-12 py-4 sm:py-5 rounded-2xl sm:rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate || nifMismatch ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : isCreditDocument ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-orange-500 text-white hover:bg-orange-600 sm:bg-slate-900 sm:hover:bg-orange-500'}`} disabled={!!(isDuplicate || nifMismatch)}>{isCreditDocument ? 'Confirmar Nota de Crédito' : 'Confirmar Entrada'} <Check size={20} className="inline ml-2" /></button>
                     </div>
                  </div>
                </div>

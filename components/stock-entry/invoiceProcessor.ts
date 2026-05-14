@@ -73,6 +73,24 @@ export const parsePortugueseQrData = (text: string): PortugueseQrData => {
   };
 };
 
+const withoutAccents = (value: string) =>
+  value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+export const normalizePortugueseDocumentType = (...values: Array<string | undefined | null>) => {
+  const joined = withoutAccents(values.filter(Boolean).join(' ').toUpperCase()).replace(/\s+/g, ' ').trim();
+  if (!joined) return undefined;
+
+  if (/\bN\/?C\b/.test(joined) || joined.includes('NOTA DE CREDITO') || joined.includes('NOTA CREDITO')) return 'NC';
+  if (/\bN\/?D\b/.test(joined) || joined.includes('NOTA DE DEBITO') || joined.includes('NOTA DEBITO')) return 'ND';
+  if (/\bFR\b/.test(joined) || joined.includes('FATURA-RECIBO') || joined.includes('FACTURA-RECIBO') || joined.includes('FATURA RECIBO')) return 'FR';
+  if (/\bFS\b/.test(joined) || joined.includes('FATURA SIMPLIFICADA') || joined.includes('FACTURA SIMPLIFICADA')) return 'FS';
+  if (/\bFT\b/.test(joined) || joined.includes('FATURA') || joined.includes('FACTURA')) return 'FT';
+  if (/\bGT\b/.test(joined) || joined.includes('GUIA DE TRANSPORTE')) return 'GT';
+  if (/\bGR\b/.test(joined) || joined.includes('GUIA DE REMESSA')) return 'GR';
+  if (/\bVD\b/.test(joined) || joined.includes('VENDA A DINHEIRO')) return 'VD';
+  return undefined;
+};
+
 const hasVatOnLines = (items: InvoiceExtractedData['items']) =>
   items.some(item => Number(item.vatRate || 0) > 0);
 
@@ -376,6 +394,7 @@ export const validateInvoiceTotals = (data: InvoiceExtractedData, detectedQrPayl
   const detectedQrText = detectedQrPayloads.find(payload => parsePortugueseQrTotal(payload) !== undefined);
   const qrText = detectedQrText || data.qrCodeText || detectedQrPayloads[0];
   const qrData = qrText ? parsePortugueseQrData(qrText) : undefined;
+  const documentType = normalizePortugueseDocumentType(qrData?.documentType, data.documentType, qrData?.documentNumber, data.invoiceNumber);
   const parsedDetectedQrTotal = detectedQrText ? parsePortugueseQrTotal(detectedQrText) : undefined;
   const parsedGeminiQrTotal = data.qrCodeText ? parsePortugueseQrTotal(data.qrCodeText) : undefined;
   const geminiQrTotal = Number(data.qrTotalAmount || 0) > 0 ? data.qrTotalAmount : undefined;
@@ -419,6 +438,7 @@ export const validateInvoiceTotals = (data: InvoiceExtractedData, detectedQrPayl
       supplierNif: qrData?.supplierNif || data.supplierNif,
       customerNif: qrData?.customerNif || data.customerNif,
       invoiceNumber: qrData?.documentNumber || data.invoiceNumber,
+      documentType: documentType || data.documentType,
       totalInvoiceAmount: inferredInvoiceTotal ?? 0,
       qrCodeText: qrText,
       qrTotalAmount: qrTotal,

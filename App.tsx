@@ -359,6 +359,7 @@ const App: React.FC = () => {
       customerName: invoiceData?.customerName,
       customerNif: invoiceData?.customerNif,
       docNumber: invoiceData?.docNumber || 'S/N',
+      documentType: invoiceData?.documentType,
       totalAmount: invoiceData?.totalAmount || 0,
       dateIssued: invoiceData?.dateIssued || new Date().toISOString().split('T')[0],
       status: InvoiceStatus.PENDING,

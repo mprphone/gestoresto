@@ -272,16 +272,47 @@ invoicesRouter.get('/:id/lines', async (req, res, next) => {
   }
 });
 
-// Detects credit/debit notes by doc number prefix (NC, ND, NA) or negative total
+const normalizeDocumentType = (value) => String(value || '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toUpperCase()
+  .replace(/\s+/g, ' ')
+  .trim();
+
+function inferDocumentType(payload) {
+  const qrType = (() => {
+    const qr = String(payload.qrCodeText || '');
+    const match = qr.match(/(?:^|\*)D:([^*]+)/);
+    return match ? match[1] : '';
+  })();
+  const text = normalizeDocumentType([
+    payload.documentType,
+    qrType,
+    payload.docNumber,
+    payload.ocrJson?.documentType,
+    payload.ocrJson?.invoiceNumber
+  ].filter(Boolean).join(' '));
+
+  if (/\bN\/?C\b/.test(text) || text.includes('NOTA DE CREDITO')) return 'NC';
+  if (/\bN\/?D\b/.test(text) || text.includes('NOTA DE DEBITO')) return 'ND';
+  if (/\bFR\b/.test(text) || text.includes('FATURA-RECIBO') || text.includes('FATURA RECIBO')) return 'FR';
+  if (/\bFS\b/.test(text) || text.includes('FATURA SIMPLIFICADA')) return 'FS';
+  if (/\bFT\b/.test(text) || text.includes('FATURA')) return 'FT';
+  return undefined;
+}
+
+// Detects credit/debit notes by explicit type, doc number prefix or negative total
 function isCreditNote(payload) {
-  const doc = String(payload.docNumber || '').trim().toUpperCase();
-  return doc.startsWith('NC') || doc.startsWith('ND') || doc.startsWith('NA') ||
+  const documentType = inferDocumentType(payload);
+  const doc = normalizeDocumentType(payload.docNumber);
+  return documentType === 'NC' || documentType === 'ND' || doc.startsWith('NC') || doc.startsWith('ND') || doc.startsWith('NA') ||
     Number(payload.totalAmount || 0) < 0;
 }
 
 invoicesRouter.post('/', async (req, res, next) => {
   try {
     const payload = req.body;
+    payload.documentType = payload.documentType || inferDocumentType(payload);
     const isCredit = isCreditNote(payload);
     // For credit notes, negate quantities and total so stock is reduced
     if (isCredit) {
