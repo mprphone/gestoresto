@@ -27,7 +27,8 @@ import EmployeesManagement from './components/EmployeesManagement';
 import InvoiceReview from './components/InvoiceReview';
 import Expenses from './components/Expenses';
 import CompanyAdmin from './components/CompanyAdmin';
-import RestaurantSwitcher from './components/RestaurantSwitcher';
+import RestaurantSelector from './components/RestaurantSelector';
+import UserMenu from './components/UserMenu';
 import { listPendingInvoices, subscribePush, getVapidPublicKey } from './data/reviewRepository';
 import { listRestaurants as fetchUserRestaurants, switchRestaurant } from './data/companiesRepository';
 import { setAuthRestaurant, getAuthRestaurant } from './data/apiClient';
@@ -42,8 +43,6 @@ import {
   Building2,
   Wallet,
   Link2,
-  Store,
-  Users,
   LogOut,
   ClipboardCheck,
   Receipt,
@@ -70,6 +69,7 @@ const App: React.FC = () => {
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
   const [currentRestaurant, setCurrentRestaurant] = useState<Restaurant | null>(null);
   const [userRestaurants, setUserRestaurants] = useState<Restaurant[]>([]);
+  const [restaurantsLoading, setRestaurantsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'restaurant' | 'employees' | 'review' | 'expenses' | 'companies'>('dash');
   const [pendingReviewCount, setPendingReviewCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -114,27 +114,31 @@ const App: React.FC = () => {
     setArchiveDocuments(archiveGroups.flatMap(group => group.data));
   };
 
-  // On startup: if already logged in via localStorage, load restaurant context
+  // On startup: restore restaurant context for already-logged-in users
   useEffect(() => {
-    if (!currentUser || currentRestaurant) return;
+    if (!currentUser) { setRestaurantsLoading(false); return; }
     fetchUserRestaurants(currentUser.id)
       .then(list => {
         setUserRestaurants(list);
         const savedId = getAuthRestaurant();
-        const current = list.find(r => r.id === savedId) || list[0] || null;
+        const saved = list.find(r => r.id === savedId);
+        // Auto-enter: saved restaurant is valid, OR user only has one
+        const current = saved || (list.length === 1 ? list[0] : null);
         setCurrentRestaurant(current);
         if (current) setAuthRestaurant(current.id);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setRestaurantsLoading(false));
   }, [currentUser?.id]);
 
+  // Load operational data only after restaurant is selected
   useEffect(() => {
-    if (!currentUser) { setIsLoading(false); return; }
+    if (!currentUser || !currentRestaurant) { setIsLoading(false); return; }
     setIsLoading(true);
     refreshData()
       .catch(error => setLoadError(error.message || 'Falha ao carregar dados'))
       .finally(() => setIsLoading(false));
-  }, [currentUser]);
+  }, [currentUser?.id, currentRestaurant?.id]);
 
   // Service worker + push subscription (admins only)
   useEffect(() => {
@@ -176,30 +180,31 @@ const App: React.FC = () => {
   }, [currentUser?.id]);
 
   const handleLogin = async (email: string, password: string) => {
-    const { user, restaurants, currentRestaurant } = await login(email, password);
+    const { user, restaurants, currentRestaurant: savedRestaurant } = await login(email, password);
     setCurrentUser(user);
     localStorage.setItem('gestoresto_user', JSON.stringify(user));
     setUserRestaurants(restaurants);
-    const current = currentRestaurant || restaurants[0] || null;
+    setRestaurantsLoading(false);
+    // Auto-enter if saved restaurant is valid, or user only has one
+    const current = savedRestaurant || (restaurants.length === 1 ? restaurants[0] : null);
     setCurrentRestaurant(current);
     if (current) setAuthRestaurant(current.id);
   };
 
-  const handleSwitchRestaurant = async (restaurant: Restaurant) => {
+  const handleSelectRestaurant = async (restaurant: Restaurant) => {
     if (!currentUser) return;
-    try {
-      await switchRestaurant(currentUser.id, restaurant.id);
-      setCurrentRestaurant(restaurant);
-      setAuthRestaurant(restaurant.id);
-      refreshData();
-    } catch { /* ignore */ }
+    try { await switchRestaurant(currentUser.id, restaurant.id); } catch { /* ignore */ }
+    setCurrentRestaurant(restaurant);
+    setAuthRestaurant(restaurant.id);
   };
 
   const handleLogout = () => {
     localStorage.removeItem('gestoresto_user');
+    localStorage.removeItem('gestoresto_restaurant_id');
     setCurrentUser(null);
     setCurrentRestaurant(null);
     setUserRestaurants([]);
+    setRestaurantsLoading(true);
     setProducts([]);
     setInvoices([]);
     setUsers([]);
@@ -400,6 +405,18 @@ const App: React.FC = () => {
     return <LoginScreen onLogin={handleLogin} />;
   }
 
+  if (!currentRestaurant) {
+    return (
+      <RestaurantSelector
+        restaurants={userRestaurants}
+        userName={currentUser.name}
+        loading={restaurantsLoading}
+        onSelect={handleSelectRestaurant}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
       {notice && <SystemNotice type={notice.type} message={notice.message} onClose={() => setNotice(null)} />}
@@ -444,15 +461,14 @@ const App: React.FC = () => {
             {activeTab === 'entry' ? "Entrada IA no Stock" : activeTab.toUpperCase()}
           </h2>
           <div className="flex items-center gap-3">
-            {currentRestaurant && (
-              <RestaurantSwitcher
-                current={currentRestaurant}
-                all={userRestaurants}
-                onSwitch={handleSwitchRestaurant}
-              />
-            )}
-            {isFuncionario && <span className="hidden sm:inline text-[10px] font-black text-orange-500 uppercase tracking-widest border border-orange-200 bg-orange-50 rounded-lg px-2 py-1">{currentUser.name}</span>}
             {!isFuncionario && <AlertsPanel products={products} batches={[]} invoices={invoices} restaurantProfile={restaurantProfile} />}
+            <UserMenu
+              user={currentUser}
+              currentRestaurant={currentRestaurant}
+              canSwitch={userRestaurants.length > 1}
+              onSwitchRestaurant={() => setCurrentRestaurant(null)}
+              onLogout={handleLogout}
+            />
           </div>
         </header>
 
