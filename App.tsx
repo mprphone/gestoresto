@@ -46,7 +46,6 @@ import {
   LogOut,
   ClipboardCheck,
   Receipt,
-  Settings
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -434,7 +433,10 @@ const App: React.FC = () => {
       <aside className="hidden md:flex w-72 bg-slate-900 text-white flex-col sticky top-0 h-screen overflow-y-auto no-scrollbar">
         <div className="p-8 flex items-center gap-3">
           <UtensilsCrossed className="text-orange-500 w-8 h-8" />
-          <h1 className="font-black text-2xl tracking-tighter uppercase italic">GestoRestô</h1>
+          <div className="min-w-0">
+            <h1 className="font-black text-2xl tracking-tighter uppercase italic">GestoRestô</h1>
+            <p className="text-[10px] font-black text-orange-400 uppercase tracking-widest truncate">{currentRestaurant.name}</p>
+          </div>
         </div>
         <nav className="flex-1 px-6 space-y-1">
             <NavItem icon={<LayoutDashboard />} label="Dashboard" active={activeTab === 'dash'} onClick={() => setActiveTab('dash')} />
@@ -452,14 +454,6 @@ const App: React.FC = () => {
           </nav>
         <div className="p-6 border-t border-slate-800">
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{currentUser.name}</p>
-          {isAdmin && (
-            <button
-              onClick={() => setActiveTab('companies')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all font-bold text-sm mb-1 ${activeTab === 'companies' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
-            >
-              <Settings size={16} /> Administração
-            </button>
-          )}
           <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all font-bold text-sm">
             <LogOut size={18} /> Sair
           </button>
@@ -477,6 +471,8 @@ const App: React.FC = () => {
               user={currentUser}
               currentRestaurant={currentRestaurant}
               canSwitch={userRestaurants.length > 1}
+              canAdmin={isAdmin}
+              onAdmin={() => setActiveTab('companies')}
               onSwitchRestaurant={() => setCurrentRestaurant(null)}
               onLogout={handleLogout}
             />

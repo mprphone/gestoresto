@@ -1,16 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, LogOut, ArrowLeftRight } from 'lucide-react';
+import { ChevronDown, LogOut, ArrowLeftRight, Settings } from 'lucide-react';
 import { AppUser, Restaurant } from '../types';
 
 interface Props {
   user: AppUser;
   currentRestaurant: Restaurant;
   canSwitch: boolean;
+  canAdmin?: boolean;
+  onAdmin?: () => void;
   onSwitchRestaurant: () => void;
   onLogout: () => void;
 }
 
-const UserMenu: React.FC<Props> = ({ user, currentRestaurant, canSwitch, onSwitchRestaurant, onLogout }) => {
+const UserMenu: React.FC<Props> = ({ user, currentRestaurant, canSwitch, canAdmin, onAdmin, onSwitchRestaurant, onLogout }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -56,9 +58,19 @@ const UserMenu: React.FC<Props> = ({ user, currentRestaurant, canSwitch, onSwitc
             </button>
           )}
 
+          {canAdmin && (
+            <button
+              onClick={() => { onAdmin?.(); setOpen(false); }}
+              className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors text-left ${canSwitch ? 'border-t border-slate-100' : ''}`}
+            >
+              <Settings size={14} className="text-slate-400 shrink-0" />
+              <span className="text-xs font-bold text-slate-700">Administração</span>
+            </button>
+          )}
+
           <button
             onClick={() => { onLogout(); setOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors text-left ${canSwitch ? 'border-t border-slate-100' : ''}`}
+            className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors text-left ${(canSwitch || canAdmin) ? 'border-t border-slate-100' : ''}`}
           >
             <LogOut size={14} className="text-slate-400 shrink-0" />
             <span className="text-xs font-bold text-slate-700">Sair</span>
