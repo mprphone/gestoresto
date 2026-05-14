@@ -69,7 +69,7 @@ export async function runMigrations() {
       is_active   boolean not null default true,
       created_at  timestamptz not null default now()
     )
-  `);
+  `).catch(() => {});
 
   await query(`
     insert into expense_categories (id, name, sort_order) values
@@ -82,13 +82,46 @@ export async function runMigrations() {
       ('Contabilidade',    'Contabilidade',      7),
       ('Outros',           'Outros',             8)
     on conflict (id) do nothing
-  `);
+  `).catch(() => {});
 
   await query(`grant select on expense_categories to ubuntu`).catch(() => {});
 
-  // ── 2 & 3. Add FK constraints where columns already exist (added by postgres) ─
-  // The columns themselves are added via postgres superuser on first deploy.
-  // Here we just add FK constraints if missing (harmless if already exist).
+  // ── 2. Workspace columns and scoped uniqueness ─────────────────────────────
+  for (const sql of [
+    `alter table app_users add column if not exists last_company_id uuid`,
+    `alter table app_users add column if not exists last_restaurant_id uuid`,
+    `alter table products add column if not exists restaurant_id uuid`,
+    `alter table suppliers add column if not exists restaurant_id uuid`,
+    `alter table purchase_invoices add column if not exists restaurant_id uuid`,
+    `alter table movements add column if not exists restaurant_id uuid`,
+    `alter table digital_archive_documents add column if not exists restaurant_id uuid`
+  ]) {
+    await query(sql).catch(() => {});
+  }
+
+  await query(`drop index if exists products_name_unit_unique`).catch(() => {});
+  await query(`
+    create unique index if not exists products_restaurant_name_unit_unique
+    on products (restaurant_id, normalized_name, unit)
+    where restaurant_id is not null and is_active = true
+  `).catch(() => {});
+
+  await query(`drop index if exists suppliers_nif_unique`).catch(() => {});
+  await query(`drop index if exists suppliers_normalized_nif_unique`).catch(() => {});
+  await query(`
+    create unique index if not exists suppliers_restaurant_normalized_nif_unique
+    on suppliers (restaurant_id, normalized_nif)
+    where restaurant_id is not null and normalized_nif <> ''
+  `).catch(() => {});
+
+  await query(`drop index if exists invoices_unique_supplier_doc`).catch(() => {});
+  await query(`
+    create unique index if not exists invoices_restaurant_supplier_doc_unique
+    on purchase_invoices (restaurant_id, supplier_nif, doc_number)
+    where restaurant_id is not null
+  `).catch(() => {});
+
+  // ── 3. Add FK constraints if missing ───────────────────────────────────────
   const fkMigrations = [
     `do $$ begin
        if not exists (select 1 from pg_constraint where conname = 'app_users_last_company_id_fkey') then

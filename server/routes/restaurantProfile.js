@@ -5,6 +5,17 @@ export const restaurantProfileRouter = Router();
 
 restaurantProfileRouter.get('/', async (_req, res, next) => {
   try {
+    if (_req.restaurantId) {
+      const current = await query(`
+        select id, name, nif, legal_name, email, phone, address, postal_code, city, country, notification_emails
+        from restaurants
+        where id = $1 and is_active = true
+      `, [_req.restaurantId]);
+      const restaurant = current.rows[0] || null;
+      if (restaurant) restaurant.notificationEmails = restaurant.notification_emails || [];
+      res.json({ data: restaurant });
+      return;
+    }
     const result = await query(`
       select *
       from restaurant_profile
@@ -31,6 +42,39 @@ restaurantProfileRouter.post('/', async (req, res, next) => {
     }
 
     const notifEmails = Array.isArray(profile.notificationEmails) ? profile.notificationEmails : [];
+    if (req.restaurantId) {
+      const result = await query(`
+        update restaurants set
+          name = $2,
+          nif = $3,
+          legal_name = $4,
+          email = $5,
+          phone = $6,
+          address = $7,
+          postal_code = $8,
+          city = $9,
+          country = coalesce($10, 'Portugal'),
+          notification_emails = $11,
+          updated_at = now()
+        where id = $1
+        returning *
+      `, [
+        req.restaurantId,
+        profile.name,
+        String(profile.nif).replace(/\D/g, ''),
+        profile.legalName || null,
+        profile.email || null,
+        profile.phone || null,
+        profile.address || null,
+        profile.postalCode || null,
+        profile.city || null,
+        profile.country || 'Portugal',
+        notifEmails
+      ]);
+      res.status(201).json(result.rows[0]);
+      return;
+    }
+
     const result = await query(`
       insert into restaurant_profile (
         id, name, nif, legal_name, email, phone, address, postal_code, city, country, is_active, notification_emails

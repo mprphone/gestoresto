@@ -25,6 +25,27 @@ export async function ensureDefaultAdminUser() {
   `, ['MPR', 'mpr@mpr.pt', null, hashPassword('1234')]);
 }
 
+async function loadUserRestaurants(userId) {
+  const restaurantsRes = await query(`
+    select r.id, r.name, r.nif, r.company_id, c.name as company_name,
+           r.notification_emails, ura.role as user_role
+    from user_restaurant_access ura
+    join restaurants r on r.id = ura.restaurant_id
+    join companies c on c.id = r.company_id
+    where ura.user_id = $1 and ura.is_active = true and r.is_active = true
+    order by c.name asc, r.name asc
+  `, [userId]);
+  return restaurantsRes.rows;
+}
+
+async function loadCurrentRestaurantForUser(user) {
+  const restaurants = await loadUserRestaurants(user.id);
+  const currentRestaurant = user.last_restaurant_id
+    ? restaurants.find(r => r.id === user.last_restaurant_id) || null
+    : null;
+  return { restaurants, currentRestaurant };
+}
+
 authRouter.post('/bootstrap', async (req, res, next) => {
   try {
     const count = await query('select count(*) from app_users');
@@ -62,26 +83,31 @@ authRouter.post('/login', async (req, res, next) => {
       return;
     }
 
-    // Load accessible restaurants for this user
-    const restaurantsRes = await query(`
-      select r.id, r.name, r.nif, r.company_id, c.name as company_name,
-             r.notification_emails, ura.role as user_role
-      from user_restaurant_access ura
-      join restaurants r on r.id = ura.restaurant_id
-      join companies c on c.id = r.company_id
-      where ura.user_id = $1 and ura.is_active = true and r.is_active = true
-      order by c.name asc, r.name asc
-    `, [user.id]);
-    const restaurants = restaurantsRes.rows;
-
-    // Determine current restaurant: last used, or first available
-    let currentRestaurant = restaurants.find(r => r.id === user.last_restaurant_id) || restaurants[0] || null;
+    const { restaurants, currentRestaurant } = await loadCurrentRestaurantForUser(user);
 
     res.json({
       id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role,
       restaurants,
       currentRestaurant
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+authRouter.get('/context', async (req, res, next) => {
+  try {
+    const userId = req.query.userId || req.headers['x-user-id'];
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    const result = await query(`
+      select id, name, email, phone, role, last_restaurant_id, last_company_id
+      from app_users
+      where id = $1 and is_active = true
+    `, [userId]);
+    const user = result.rows[0];
+    if (!user) return res.status(404).json({ error: 'Utilizador não encontrado.' });
+    const { restaurants, currentRestaurant } = await loadCurrentRestaurantForUser(user);
+    res.json({ restaurants, currentRestaurant });
   } catch (error) {
     next(error);
   }

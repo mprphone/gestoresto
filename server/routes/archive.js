@@ -7,8 +7,14 @@ import multer from 'multer';
 import { query } from '../db.js';
 import { config } from '../config.js';
 import { pageRange, pageResult } from '../pagination.js';
+import { requireRestaurantContext } from '../middleware/restaurantContext.js';
 
 export const archiveRouter = Router();
+
+archiveRouter.use((req, res, next) => {
+  if (req.path.startsWith('/file/')) return next();
+  return requireRestaurantContext(req, res, next);
+});
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -37,11 +43,11 @@ archiveRouter.get('/invoice/:invoiceId', async (req, res, next) => {
     const result = await query(`
       select *
       from digital_archive_documents
-      where invoice_id = $1
+      where invoice_id = $1 and restaurant_id = $4
       order by created_at desc
       limit $2 offset $3
-    `, [req.params.invoiceId, limit, offset]);
-    const count = await query('select count(*) from digital_archive_documents where invoice_id = $1', [req.params.invoiceId]);
+    `, [req.params.invoiceId, limit, offset, req.restaurantId]);
+    const count = await query('select count(*) from digital_archive_documents where invoice_id = $1 and restaurant_id = $2', [req.params.invoiceId, req.restaurantId]);
     res.json(pageResult(result.rows, count.rows[0].count, page, pageSize));
   } catch (error) {
     next(error);
@@ -86,18 +92,19 @@ archiveRouter.post('/upload', upload.single('file'), async (req, res, next) => {
 
     const result = await query(`
       insert into digital_archive_documents (
-        document_type, invoice_id, payment_id, supplier_id, original_filename,
+        document_type, restaurant_id, invoice_id, payment_id, supplier_id, original_filename,
         mime_type, byte_size, sha256, storage_provider, storage_path,
         local_root, page_count, quality_ok, has_qr_code, has_atcud, atcud, notes
       )
-      values ($1::archive_document_type, $2, $3, $4, $5, $6, $7, $8, 'bunker', $9, $10, coalesce($11, 1), $12, $13, $14, $15, $16)
+      values ($1::archive_document_type, $2, $3, $4, $5, $6, $7, $8, $9, 'bunker', $10, $11, coalesce($12, 1), $13, $14, $15, $16, $17)
       on conflict (sha256) where sha256 is not null do update set
         invoice_id = coalesce(excluded.invoice_id, digital_archive_documents.invoice_id),
         payment_id = coalesce(excluded.payment_id, digital_archive_documents.payment_id),
-        supplier_id = coalesce(excluded.supplier_id, digital_archive_documents.supplier_id)
+        supplier_id = coalesce(excluded.supplier_id, digital_archive_documents.supplier_id),
+        restaurant_id = coalesce(digital_archive_documents.restaurant_id, excluded.restaurant_id)
       returning *
     `, [
-      documentType, req.body.invoiceId || null, req.body.paymentId || null, req.body.supplierId || null,
+      documentType, req.restaurantId, req.body.invoiceId || null, req.body.paymentId || null, req.body.supplierId || null,
       req.file.originalname, req.file.mimetype, req.file.size, sha256, absolutePath,
       config.archiveRoot, req.body.pageCount, req.body.qualityOk, req.body.hasQrCode,
       req.body.hasAtcud, req.body.atcud || null, req.body.notes || null

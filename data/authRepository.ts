@@ -32,6 +32,14 @@ export async function login(email: string, password: string): Promise<LoginResul
   };
 }
 
+export async function getUserContext(userId: string): Promise<Pick<LoginResult, 'restaurants' | 'currentRestaurant'>> {
+  const row = await apiGet<any>(`/api/auth/context?userId=${userId}`);
+  return {
+    restaurants: (row.restaurants || []).map(fromRestaurant),
+    currentRestaurant: row.currentRestaurant ? fromRestaurant(row.currentRestaurant) : null
+  };
+}
+
 export async function listUsers(): Promise<AppUser[]> {
   const result = await apiGet<{ data: any[] }>('/api/auth/users');
   return result.data.map(fromDb);

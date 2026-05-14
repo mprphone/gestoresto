@@ -8,18 +8,26 @@ aliasesRouter.get('/', async (req, res, next) => {
   try {
     const { page, pageSize, limit, offset } = pageRange(req);
     const supplierId = req.query.supplierId;
-    const params = supplierId ? [supplierId, limit, offset] : [limit, offset];
-    const where = supplierId ? 'where supplier_id = $1' : '';
+    const params = supplierId ? [supplierId, req.restaurantId, limit, offset] : [req.restaurantId, limit, offset];
+    const where = supplierId
+      ? 'where pa.supplier_id = $1 and (s.restaurant_id = $2 or p.restaurant_id = $2)'
+      : 'where (s.restaurant_id = $1 or p.restaurant_id = $1)';
     const result = await query(`
-      select *
-      from product_aliases
+      select pa.*
+      from product_aliases pa
+      left join suppliers s on s.id = pa.supplier_id
+      join products p on p.id = pa.product_id
       ${where}
       order by last_seen_at desc nulls last, created_at desc
-      limit $${supplierId ? 2 : 1} offset $${supplierId ? 3 : 2}
+      limit $${supplierId ? 3 : 2} offset $${supplierId ? 4 : 3}
     `, params);
     const count = await query(
-      `select count(*) from product_aliases ${where}`,
-      supplierId ? [supplierId] : []
+      `select count(*)
+       from product_aliases pa
+       left join suppliers s on s.id = pa.supplier_id
+       join products p on p.id = pa.product_id
+       ${where}`,
+      supplierId ? [supplierId, req.restaurantId] : [req.restaurantId]
     );
     res.json(pageResult(result.rows, count.rows[0].count, page, pageSize));
   } catch (error) {
@@ -30,6 +38,12 @@ aliasesRouter.get('/', async (req, res, next) => {
 aliasesRouter.post('/', async (req, res, next) => {
   try {
     const alias = req.body;
+    const product = await query('select id from products where id = $1 and restaurant_id = $2', [alias.productId, req.restaurantId]);
+    if (!product.rows[0]) return res.status(404).json({ error: 'Artigo não encontrado neste restaurante.' });
+    if (alias.supplierId) {
+      const supplier = await query('select id from suppliers where id = $1 and restaurant_id = $2', [alias.supplierId, req.restaurantId]);
+      if (!supplier.rows[0]) return res.status(404).json({ error: 'Fornecedor não encontrado neste restaurante.' });
+    }
     const result = await query(`
       insert into product_aliases (
         id, supplier_id, product_id, supplier_item_name, supplier_item_code,

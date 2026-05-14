@@ -41,6 +41,7 @@ function invoiceBaseName(invoice, payload) {
 
 async function insertGeneratedArchiveDocument(client, {
   documentType = 'FATURA',
+  restaurantId,
   invoiceId,
   supplierId,
   filename,
@@ -72,6 +73,9 @@ async function insertGeneratedArchiveDocument(client, {
     localRoot, pageCount, qualityOk, hasQrCode, hasAtcud, atcud || null, notes || null
   ]);
   const saved = result.rows[0];
+  if (restaurantId) {
+    await client.query('update digital_archive_documents set restaurant_id = $1 where id = $2', [restaurantId, saved.id]);
+  }
   const withUrl = await client.query(
     'update digital_archive_documents set public_url = $1 where id = $2 returning *',
     [`/api/archive/file/${saved.id}`, saved.id]
@@ -121,7 +125,7 @@ async function generateInvoicePdf({ invoice, payload, imageDocuments, outputPath
   await fs.writeFile(outputPath, Buffer.concat(chunks));
 }
 
-async function assertNotDuplicateInvoice(client, payload) {
+async function assertNotDuplicateInvoice(client, payload, restaurantId) {
   const supplierNif = onlyDigits(payload.supplierNif);
   const docNumber = normalizeDocNumber(payload.docNumber);
   const totalCents = toCents(payload.totalAmount);
@@ -131,9 +135,9 @@ async function assertNotDuplicateInvoice(client, payload) {
     const exact = await client.query(`
       select id, supplier_name, doc_number, total_amount, date_issued
       from purchase_invoices
-      where normalized_supplier_nif = $1 and normalized_doc_number = $2
+      where normalized_supplier_nif = $1 and normalized_doc_number = $2 and restaurant_id = $3
       limit 1
-    `, [supplierNif, docNumber]);
+    `, [supplierNif, docNumber, restaurantId]);
     if (exact.rows[0]) {
       const error = new Error(`Fatura duplicada: ${exact.rows[0].supplier_name} ${exact.rows[0].doc_number} já foi registada.`);
       error.statusCode = 409;
@@ -146,11 +150,12 @@ async function assertNotDuplicateInvoice(client, payload) {
       select id, supplier_name, doc_number, total_amount, date_issued
       from purchase_invoices
       where normalized_supplier_nif = $1
+        and restaurant_id = $4
         and abs(round(total_amount * 100) - $2) <= 1
         and abs(date_issued - $3::date) <= 3
       order by date_issued desc
       limit 1
-    `, [supplierNif, totalCents, dateIssued]);
+    `, [supplierNif, totalCents, dateIssued, restaurantId]);
     if (similar.rows[0]) {
       const error = new Error(`Possível fatura duplicada: já existe ${similar.rows[0].doc_number} de ${similar.rows[0].date_issued} com o mesmo fornecedor e total.`);
       error.statusCode = 409;
@@ -159,14 +164,13 @@ async function assertNotDuplicateInvoice(client, payload) {
   }
 }
 
-async function validateRestaurantCustomer(client, payload) {
+async function validateRestaurantCustomer(client, payload, restaurantId) {
   const profileResult = await client.query(`
-    select *
-    from restaurant_profile
-    where is_active = true
-    order by updated_at desc
+    select id, name, nif
+    from restaurants
+    where id = $1 and is_active = true
     limit 1
-  `);
+  `, [restaurantId]);
   const profile = profileResult.rows[0] || null;
   const customerNif = onlyDigits(payload.customerNif);
 
@@ -183,7 +187,7 @@ async function validateRestaurantCustomer(client, payload) {
   const expectedNif = onlyDigits(profile.nif);
   if (!customerNif) {
     return {
-      profileId: profile.id,
+      profileId: null,
       customerNif: null,
       customerName: payload.customerName || null,
       status: 'ALERTA',
@@ -193,7 +197,7 @@ async function validateRestaurantCustomer(client, payload) {
 
   if (customerNif !== expectedNif) {
     return {
-      profileId: profile.id,
+      profileId: null,
       customerNif,
       customerName: payload.customerName || null,
       status: 'ALERTA',
@@ -202,7 +206,7 @@ async function validateRestaurantCustomer(client, payload) {
   }
 
   return {
-    profileId: profile.id,
+    profileId: null,
     customerNif,
     customerName: payload.customerName || profile.name,
     status: 'VALIDO',
@@ -242,10 +246,11 @@ invoicesRouter.get('/', async (req, res, next) => {
     const result = await query(`
       select *
       from purchase_invoices
+      where restaurant_id = $3
       order by date_issued desc, id desc
       limit $1 offset $2
-    `, [limit, offset]);
-    const count = await query('select count(*) from purchase_invoices');
+    `, [limit, offset, req.restaurantId]);
+    const count = await query('select count(*) from purchase_invoices where restaurant_id = $1', [req.restaurantId]);
     res.json(pageResult(result.rows, count.rows[0].count, page, pageSize));
   } catch (error) {
     next(error);
@@ -255,11 +260,12 @@ invoicesRouter.get('/', async (req, res, next) => {
 invoicesRouter.get('/:id/lines', async (req, res, next) => {
   try {
     const result = await query(`
-      select *
-      from purchase_invoice_lines
-      where invoice_id = $1
+      select pil.*
+      from purchase_invoice_lines pil
+      join purchase_invoices pi on pi.id = pil.invoice_id
+      where pil.invoice_id = $1 and pi.restaurant_id = $2
       order by line_number asc
-    `, [req.params.id]);
+    `, [req.params.id, req.restaurantId]);
     res.json({ data: result.rows });
   } catch (error) {
     next(error);
@@ -293,21 +299,21 @@ invoicesRouter.post('/', async (req, res, next) => {
       }
     }
     const saved = await withTransaction(async client => {
-      const restaurantValidation = await validateRestaurantCustomer(client, payload);
+      const restaurantValidation = await validateRestaurantCustomer(client, payload, req.restaurantId);
       const totalValidation = validateInvoiceTotals(payload);
       if (totalValidation.status === 'ALERTA') {
         const error = new Error(totalValidation.notes || 'Os totais da fatura não correspondem.');
         error.statusCode = 422;
         throw error;
       }
-      await assertNotDuplicateInvoice(client, payload);
+      await assertNotDuplicateInvoice(client, payload, req.restaurantId);
       let supplierId = payload.supplierId || null;
       if (!supplierId && payload.supplierNif) {
         const normalizedSupplierNif = onlyDigits(payload.supplierNif);
         const supplier = await client.query(`
-          insert into suppliers (name, nif, email, phone, payment_terms_days)
-          values ($1, $2, $3, $4, coalesce($5, 30))
-          on conflict (normalized_nif) where normalized_nif <> '' do update set
+          insert into suppliers (name, nif, email, phone, payment_terms_days, restaurant_id)
+          values ($1, $2, $3, $4, coalesce($5, 30), $6)
+          on conflict (restaurant_id, normalized_nif) where normalized_nif <> '' do update set
             name = excluded.name,
             nif = excluded.nif,
             email = coalesce(excluded.email, suppliers.email),
@@ -318,7 +324,8 @@ invoicesRouter.post('/', async (req, res, next) => {
           normalizedSupplierNif,
           payload.supplierEmail || null,
           payload.supplierPhone || null,
-          payload.paymentTermsDays || 30
+          payload.paymentTermsDays || 30,
+          req.restaurantId
         ]);
         supplierId = supplier.rows[0].id;
         await audit(client, req, 'upsert', 'suppliers', supplierId, null, supplier.rows[0]);
@@ -326,6 +333,7 @@ invoicesRouter.post('/', async (req, res, next) => {
 
       const invoice = await client.query(`
         insert into purchase_invoices (
+          restaurant_id,
           supplier_id, supplier_name, supplier_nif,
           customer_name, customer_nif, restaurant_profile_id, restaurant_match_status, restaurant_match_notes,
           doc_number, total_amount,
@@ -336,15 +344,17 @@ invoicesRouter.post('/', async (req, res, next) => {
           compliance_notes, expense_category
         )
         values (
-          $1, $2, $3, $4, $5, $6, $7, $8,
-          $9, $10, coalesce($11, current_date), $12, coalesce($13::invoice_status, 'PENDENTE'::invoice_status), coalesce($14, 0), $15,
-          $16, $17, $18, $19, $20, $21,
-          $22, $23, $24, $25, $26,
-          $27, $28
+          $1,
+          $2, $3, $4, $5, $6, $7, $8, $9,
+          $10, $11, coalesce($12, current_date), $13, coalesce($14::invoice_status, 'PENDENTE'::invoice_status), coalesce($15, 0), $16,
+          $17, $18, $19, $20, $21, $22,
+          $23, $24, $25, $26, $27,
+          $28, $29
         )
-        on conflict (supplier_nif, doc_number) do nothing
+        on conflict (restaurant_id, supplier_nif, doc_number) where restaurant_id is not null do nothing
         returning *
       `, [
+        req.restaurantId,
         supplierId, payload.supplierName, onlyDigits(payload.supplierNif),
         restaurantValidation.customerName, restaurantValidation.customerNif, restaurantValidation.profileId,
         restaurantValidation.status, restaurantValidation.notes,
@@ -371,10 +381,10 @@ invoicesRouter.post('/', async (req, res, next) => {
       for (const archiveDocumentId of archiveDocumentIds) {
         const archive = await client.query(`
           update digital_archive_documents
-          set invoice_id = $1, supplier_id = coalesce($2, supplier_id)
-          where id = $3
+          set invoice_id = $1, supplier_id = coalesce($2, supplier_id), restaurant_id = $4
+          where id = $3 and (restaurant_id = $4 or restaurant_id is null)
           returning *
-        `, [invoiceId, supplierId, archiveDocumentId]);
+        `, [invoiceId, supplierId, archiveDocumentId, req.restaurantId]);
         if (archive.rows[0]) archiveDocuments.push(archive.rows[0]);
       }
       archiveDocument = archiveDocuments[0] || null;
@@ -420,6 +430,7 @@ invoicesRouter.post('/', async (req, res, next) => {
         await fs.writeFile(jsonPath, JSON.stringify(ocrPayload, null, 2));
         jsonDocument = await insertGeneratedArchiveDocument(client, {
           documentType: 'OUTRO',
+          restaurantId: req.restaurantId,
           invoiceId,
           supplierId,
           filename: `${baseName}.json`,
@@ -437,6 +448,7 @@ invoicesRouter.post('/', async (req, res, next) => {
         await generateInvoicePdf({ invoice: invoice.rows[0], payload, imageDocuments: archiveDocuments, outputPath: pdfPath });
         pdfDocument = await insertGeneratedArchiveDocument(client, {
           documentType: 'FATURA',
+          restaurantId: req.restaurantId,
           invoiceId,
           supplierId,
           filename: `${baseName}.pdf`,
@@ -469,7 +481,7 @@ invoicesRouter.post('/', async (req, res, next) => {
         ]);
         lines.push(lineResult.rows[0]);
 
-        const productBefore = await client.query('select * from products where id = $1 for update', [line.productId]);
+        const productBefore = await client.query('select * from products where id = $1 and restaurant_id = $2 for update', [line.productId, req.restaurantId]);
         const product = productBefore.rows[0];
         if (product) {
           const currentStock = Number(product.current_stock || 0);
@@ -484,9 +496,9 @@ invoicesRouter.post('/', async (req, res, next) => {
           const productAfter = await client.query(`
             update products
             set current_stock = $1, average_price = $2
-            where id = $3
+            where id = $3 and restaurant_id = $4
             returning *
-          `, [totalStock, newAveragePrice, line.productId]);
+          `, [totalStock, newAveragePrice, line.productId, req.restaurantId]);
           await audit(client, req, 'update_stock', 'products', line.productId, product, productAfter.rows[0]);
         }
 
@@ -535,9 +547,10 @@ invoicesRouter.post('/', async (req, res, next) => {
         }
 
         await client.query(`
-          insert into movements (product_id, invoice_line_id, type, quantity, price, supplier_id, supplier_name, notes)
-          values ($1, $2, 'ENTRADA'::movement_type, $3, $4, $5, $6, $7)
+          insert into movements (restaurant_id, product_id, invoice_line_id, type, quantity, price, supplier_id, supplier_name, notes)
+          values ($1, $2, $3, 'ENTRADA'::movement_type, $4, $5, $6, $7, $8)
         `, [
+          req.restaurantId,
           line.productId,
           lineResult.rows[0].id,
           line.quantityStock,
@@ -553,10 +566,7 @@ invoicesRouter.post('/', async (req, res, next) => {
       await audit(client, req, 'create', 'purchase_invoices', invoiceId, null, { ...invoice.rows[0], lines });
       {
         // Fetch notification emails from restaurant profile; fall back to config
-        const profileResult = await client.query(`
-          select notification_emails from restaurant_profile where is_active = true limit 1
-        `);
-        const profileEmails = profileResult.rows[0]?.notification_emails || [];
+        const profileEmails = req.restaurantEmails || [];
         const recipients = profileEmails.length > 0
           ? profileEmails
           : (config.invoiceOkEmailTo ? [config.invoiceOkEmailTo] : []);

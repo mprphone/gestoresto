@@ -21,6 +21,7 @@ import { companiesRouter } from './routes/companies.js';
 import { restaurantsRouter } from './routes/restaurants.js';
 import { expenseCategoriesRouter } from './routes/expenseCategories.js';
 import { runMigrations } from './migrate.js';
+import { requireRestaurantContext } from './middleware/restaurantContext.js';
 
 const app = express();
 
@@ -64,21 +65,21 @@ app.get('/api/health', async (_req, res, next) => {
   }
 });
 
-app.use('/api/products', productsRouter);
-app.use('/api/suppliers', suppliersRouter);
-app.use('/api/aliases', aliasesRouter);
-app.use('/api/conversions', conversionsRouter);
-app.use('/api/invoices', invoicesRouter);
-app.use('/api/movements', movementsRouter);
-app.use('/api/payments', paymentsRouter);
+app.use('/api/products', requireRestaurantContext, productsRouter);
+app.use('/api/suppliers', requireRestaurantContext, suppliersRouter);
+app.use('/api/aliases', requireRestaurantContext, aliasesRouter);
+app.use('/api/conversions', requireRestaurantContext, conversionsRouter);
+app.use('/api/invoices', requireRestaurantContext, invoicesRouter);
+app.use('/api/movements', requireRestaurantContext, movementsRouter);
+app.use('/api/payments', requireRestaurantContext, paymentsRouter);
 app.use('/api/archive', archiveRouter);
 app.use('/api/auth', authRouter);
-app.use('/api/reports', reportsRouter);
+app.use('/api/reports', requireRestaurantContext, reportsRouter);
 app.use('/api/emails', emailsRouter);
-app.use('/api/restaurant-profile', restaurantProfileRouter);
+app.use('/api/restaurant-profile', requireRestaurantContext, restaurantProfileRouter);
 app.use('/api/gemini', geminiRouter);
 app.use('/api/push', pushRouter);
-app.use('/api/review', reviewRouter);
+app.use('/api/review', requireRestaurantContext, reviewRouter);
 app.use('/api/companies', companiesRouter);
 app.use('/api/restaurants', restaurantsRouter);
 app.use('/api/expense-categories', expenseCategoriesRouter);

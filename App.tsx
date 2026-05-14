@@ -9,7 +9,7 @@ import { listArchiveDocumentsForInvoice, uploadArchiveDocument } from './data/ar
 import { listMovementsPage, createMovement } from './data/movementsRepository';
 import { createBatchPayment, listPayments } from './data/paymentsRepository';
 import { getRestaurantProfile, saveRestaurantProfile } from './data/restaurantProfileRepository';
-import { listUsers, login, saveUser } from './data/authRepository';
+import { getUserContext, listUsers, login, saveUser } from './data/authRepository';
 import Dashboard from './components/Dashboard';
 import InventoryList from './components/InventoryList';
 import StockEntry from './components/StockEntry';
@@ -30,7 +30,7 @@ import CompanyAdmin from './components/CompanyAdmin';
 import RestaurantSelector from './components/RestaurantSelector';
 import UserMenu from './components/UserMenu';
 import { listPendingInvoices, subscribePush, getVapidPublicKey } from './data/reviewRepository';
-import { listRestaurants as fetchUserRestaurants, switchRestaurant } from './data/companiesRepository';
+import { switchRestaurant } from './data/companiesRepository';
 import { setAuthRestaurant, getAuthRestaurant } from './data/apiClient';
 import {
   LayoutDashboard,
@@ -117,15 +117,19 @@ const App: React.FC = () => {
   // On startup: restore restaurant context for already-logged-in users
   useEffect(() => {
     if (!currentUser) { setRestaurantsLoading(false); return; }
-    fetchUserRestaurants(currentUser.id)
-      .then(list => {
-        setUserRestaurants(list);
+    getUserContext(currentUser.id)
+      .then(({ restaurants, currentRestaurant: savedRestaurant }) => {
+        setUserRestaurants(restaurants);
         const savedId = getAuthRestaurant();
-        const saved = list.find(r => r.id === savedId);
-        // Auto-enter: saved restaurant is valid, OR user only has one
-        const current = saved || (list.length === 1 ? list[0] : null);
+        const localRestaurant = restaurants.find(r => r.id === savedId);
+        const current = savedRestaurant || localRestaurant || null;
         setCurrentRestaurant(current);
-        if (current) setAuthRestaurant(current.id);
+        if (current) {
+          setAuthRestaurant(current.id);
+          if (!savedRestaurant && localRestaurant) {
+            switchRestaurant(currentUser.id, localRestaurant.id).catch(() => undefined);
+          }
+        }
       })
       .catch(() => {})
       .finally(() => setRestaurantsLoading(false));
@@ -185,17 +189,24 @@ const App: React.FC = () => {
     localStorage.setItem('gestoresto_user', JSON.stringify(user));
     setUserRestaurants(restaurants);
     setRestaurantsLoading(false);
-    // Auto-enter if saved restaurant is valid, or user only has one
-    const current = savedRestaurant || (restaurants.length === 1 ? restaurants[0] : null);
+    const localRestaurant = restaurants.find(r => r.id === getAuthRestaurant());
+    const current = savedRestaurant || localRestaurant || null;
     setCurrentRestaurant(current);
-    if (current) setAuthRestaurant(current.id);
+    if (current) {
+      setAuthRestaurant(current.id);
+      if (!savedRestaurant && localRestaurant) {
+        switchRestaurant(user.id, localRestaurant.id).catch(() => undefined);
+      }
+    }
   };
 
   const handleSelectRestaurant = async (restaurant: Restaurant) => {
     if (!currentUser) return;
-    try { await switchRestaurant(currentUser.id, restaurant.id); } catch { /* ignore */ }
-    setCurrentRestaurant(restaurant);
+    let selected = restaurant;
+    try { selected = await switchRestaurant(currentUser.id, restaurant.id); } catch { /* ignore */ }
+    setCurrentRestaurant(selected);
     setAuthRestaurant(restaurant.id);
+    setActiveTab('dash');
   };
 
   const handleLogout = () => {

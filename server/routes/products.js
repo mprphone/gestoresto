@@ -6,25 +6,20 @@ import { audit } from '../audit.js';
 export const productsRouter = Router();
 
 const productSelect = `
-  select id, name, category, unit, current_stock, average_price, min_stock, updated_at
+  select id, name, category, unit, current_stock, average_price, min_stock, updated_at, restaurant_id
   from products
 `;
 
 productsRouter.get('/', async (req, res, next) => {
   try {
     const { page, pageSize, limit, offset } = pageRange(req);
-    const restaurantId = req.headers['x-restaurant-id'] || null;
-    const filter = restaurantId ? 'and (restaurant_id = $3 or restaurant_id is null)' : '';
-    const params = restaurantId ? [limit, offset, restaurantId] : [limit, offset];
     const result = await query(`
       ${productSelect}
-      where is_active = true ${filter}
+      where is_active = true and restaurant_id = $3
       order by category asc, name asc
       limit $1 offset $2
-    `, params);
-    const countParams = restaurantId ? [restaurantId] : [];
-    const countFilter = restaurantId ? 'and (restaurant_id = $1 or restaurant_id is null)' : '';
-    const count = await query(`select count(*) from products where is_active = true ${countFilter}`, countParams);
+    `, [limit, offset, req.restaurantId]);
+    const count = await query('select count(*) from products where is_active = true and restaurant_id = $1', [req.restaurantId]);
     res.json(pageResult(result.rows, count.rows[0].count, page, pageSize));
   } catch (error) {
     next(error);
@@ -40,15 +35,15 @@ productsRouter.post('/', async (req, res, next) => {
       where normalized_name = normalize_search_text($1)
         and unit = $2
         and ($3::uuid is null or id <> $3::uuid)
+        and restaurant_id = $4
         and is_active = true
       limit 1
-    `, [product.name, product.unit, product.id || null]);
+    `, [product.name, product.unit, product.id || null, req.restaurantId]);
     if (existing.rows[0]) {
       res.status(200).json(existing.rows[0]);
       return;
     }
 
-    const restaurantId = req.headers['x-restaurant-id'] || null;
     const result = await query(`
       insert into products (id, name, category, unit, current_stock, average_price, min_stock, restaurant_id)
       values (coalesce($1, gen_random_uuid()), $2, $3, $4, coalesce($5, 0), coalesce($6, 0), coalesce($7, 0), $8)
@@ -59,8 +54,9 @@ productsRouter.post('/', async (req, res, next) => {
         current_stock = excluded.current_stock,
         average_price = excluded.average_price,
         min_stock = excluded.min_stock
+      where products.restaurant_id = excluded.restaurant_id
       returning *
-    `, [product.id, product.name, product.category, product.unit, product.currentStock, product.averagePrice, product.minStock, restaurantId]);
+    `, [product.id, product.name, product.category, product.unit, product.currentStock, product.averagePrice, product.minStock, req.restaurantId]);
     res.status(201).json(result.rows[0]);
   } catch (error) {
     next(error);
@@ -70,8 +66,8 @@ productsRouter.post('/', async (req, res, next) => {
 productsRouter.delete('/:id', async (req, res, next) => {
   try {
     const result = await withTransaction(async client => {
-      const before = await client.query('select * from products where id = $1', [req.params.id]);
-      const after = await client.query('update products set is_active = false where id = $1 returning *', [req.params.id]);
+      const before = await client.query('select * from products where id = $1 and restaurant_id = $2', [req.params.id, req.restaurantId]);
+      const after = await client.query('update products set is_active = false where id = $1 and restaurant_id = $2 returning *', [req.params.id, req.restaurantId]);
       await audit(client, req, 'deactivate', 'products', req.params.id, before.rows[0] || null, after.rows[0] || null);
       return after.rows[0];
     });

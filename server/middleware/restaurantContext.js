@@ -12,8 +12,7 @@ export async function requireRestaurantContext(req, res, next) {
   const restaurantId = req.headers['x-restaurant-id'];
 
   if (!userId || !restaurantId) {
-    // Allow requests without context (some endpoints don't need it)
-    return next();
+    return res.status(401).json({ error: 'Restaurante ativo obrigatório.' });
   }
 
   try {

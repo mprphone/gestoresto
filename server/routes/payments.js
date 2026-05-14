@@ -4,9 +4,16 @@ import { audit } from '../audit.js';
 
 export const paymentsRouter = Router();
 
-paymentsRouter.get('/', async (_req, res, next) => {
+paymentsRouter.get('/', async (req, res, next) => {
   try {
-    const result = await query('select * from payments order by date_paid desc, id desc limit 500');
+    const result = await query(`
+      select p.*
+      from payments p
+      join purchase_invoices pi on pi.id = p.invoice_id
+      where pi.restaurant_id = $1
+      order by p.date_paid desc, p.id desc
+      limit 500
+    `, [req.restaurantId]);
     res.json({ data: result.rows });
   } catch (error) {
     next(error);
@@ -21,7 +28,7 @@ paymentsRouter.post('/batch', async (req, res, next) => {
       const payments = [];
 
       for (const invoiceId of payload.invoiceIds || []) {
-        const before = await client.query('select * from purchase_invoices where id = $1 for update', [invoiceId]);
+        const before = await client.query('select * from purchase_invoices where id = $1 and restaurant_id = $2 for update', [invoiceId, req.restaurantId]);
         const invoice = before.rows[0];
         if (!invoice || invoice.status === 'PAGO') continue;
 
