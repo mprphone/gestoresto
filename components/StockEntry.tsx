@@ -99,6 +99,46 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     return null;
   };
 
+  const imageSizeFromDataUrl = (dataUrl: string) => new Promise<{ width: number; height: number; image: HTMLImageElement }>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth || image.width, height: image.naturalHeight || image.height, image });
+    image.onerror = () => reject(new Error('Falha ao preparar imagem para OCR'));
+    image.src = dataUrl;
+  });
+
+  const prepareOcrPagesForAi = async (sourcePages: string[]) => {
+    const ocrPages: string[] = [];
+    for (const page of sourcePages) {
+      const dataUrl = page.startsWith('data:') ? page : `data:image/jpeg;base64,${page}`;
+      const { width, height, image } = await imageSizeFromDataUrl(dataUrl);
+      const ratio = height / Math.max(1, width);
+      if (ratio <= 2.15) {
+        ocrPages.push(dataUrl);
+        continue;
+      }
+
+      // Talões compridos ficam bons para arquivo, mas as linhas chegam pequenas à IA.
+      // Mantemos a foto original guardada e enviamos close-ups verticais só para OCR.
+      const sliceHeight = Math.round(width * 1.65);
+      const overlap = Math.round(sliceHeight * 0.16);
+      const step = Math.max(1, sliceHeight - overlap);
+      const maxSlices = 6;
+      let sliceCount = 0;
+      for (let y = 0; y < height && sliceCount < maxSlices; y += step) {
+        const h = Math.min(sliceHeight, height - y);
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(image, 0, y, width, h, 0, 0, width, h);
+        ocrPages.push(canvas.toDataURL('image/jpeg', 0.9));
+        sliceCount += 1;
+        if (y + h >= height) break;
+      }
+    }
+    return ocrPages.length > 0 ? ocrPages : sourcePages;
+  };
+
   // Live QR scan: scans every 600ms until QR is found, then LATCHES green.
   // Once detected, brackets stay green regardless of phone movement so the
   // user can re-frame the full invoice before tapping capture.
@@ -255,9 +295,12 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setIsProcessing(true);
     setProcessingError(null);
     try {
-      const data = await processInvoiceImage(currentPages);
+      const ocrPages = await prepareOcrPagesForAi(currentPages);
+      const data = await processInvoiceImage(ocrPages);
       if (!data || data.items.length === 0) {
-        setProcessingError('A IA não conseguiu ler artigos nesta fotografia. Tente uma foto mais próxima, nítida e com a fatura completa.');
+        setProcessingError(currentQrPayloads.length > 0
+          ? 'O QR fiscal foi lido, mas as linhas dos artigos ficaram pequenas demais para estruturar com segurança. Tente fotografar o talão por partes ou mais perto.'
+          : 'A IA não conseguiu ler artigos nesta fotografia. Tente uma foto mais próxima, nítida e com a fatura completa.');
         return;
       }
 

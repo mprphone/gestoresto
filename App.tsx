@@ -98,6 +98,12 @@ const App: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(null), notice.type === 'success' ? 4500 : 9000);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
+
   const refreshData = async () => {
     setLoadError(null);
     const [productsPage, suppliersPage, invoicesPage, aliasesPage, movementsPage, paymentRows, profile, userRows] = await Promise.all([
