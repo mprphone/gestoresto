@@ -36,7 +36,7 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
   const [selRole, setSelRole] = useState('funcionario');
   const [addingUser, setAddingUser] = useState(false);
   const [creatingUser, setCreatingUser] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'funcionario' });
+  const [newUser, setNewUser] = useState({ name: '', email: '', phone: '', password: '', role: 'funcionario' });
 
   useEffect(() => {
     setDraft(restaurant);
@@ -78,11 +78,11 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
 
   const doCreateUser = async () => {
     if (!newUser.name.trim() || !newUser.email.trim() || !newUser.password.trim()) return;
-    const created = await saveUser({ name: newUser.name, email: newUser.email, password: newUser.password, role: newUser.role as any, isActive: true });
+    const created = await saveUser({ name: newUser.name, email: newUser.email, phone: newUser.phone || undefined, password: newUser.password, role: newUser.role as any, isActive: true });
     await addUserToRestaurant(restaurant.id, created.id, newUser.role);
     await reloadUsers();
     setCreatingUser(false);
-    setNewUser({ name: '', email: '', password: '', role: 'funcionario' });
+    setNewUser({ name: '', email: '', phone: '', password: '', role: 'funcionario' });
   };
 
   const doChangeRole = async (userId: string, role: string) => {
@@ -220,10 +220,12 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
                   className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/20" />
                 <input placeholder="Email" type="email" value={newUser.email} onChange={e => setNewUser(d => ({ ...d, email: e.target.value }))}
                   className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/20" />
+                <input placeholder="Telefone" type="tel" value={newUser.phone} onChange={e => setNewUser(d => ({ ...d, phone: e.target.value }))}
+                  className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/20" />
                 <input placeholder="Password inicial" type="password" value={newUser.password} onChange={e => setNewUser(d => ({ ...d, password: e.target.value }))}
                   className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/20" />
                 <select value={newUser.role} onChange={e => setNewUser(d => ({ ...d, role: e.target.value }))}
-                  className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/20">
+                  className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/20 sm:col-span-2">
                   {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               </div>
