@@ -13,7 +13,8 @@ const fromDb = (row: any): RestaurantProfile | null => {
     address: row.address || undefined,
     postalCode: row.postal_code || undefined,
     city: row.city || undefined,
-    country: row.country || undefined
+    country: row.country || undefined,
+    notificationEmails: Array.isArray(row.notificationEmails) ? row.notificationEmails : (Array.isArray(row.notification_emails) ? row.notification_emails : [])
   };
 };
 

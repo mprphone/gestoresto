@@ -81,10 +81,10 @@ async function insertGeneratedArchiveDocument(client, {
 
 async function generateInvoicePdf({ invoice, payload, imageDocuments, outputPath }) {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  const doc = new PDFDocument({ size: 'A4', autoFirstPage: false, margin: 36, info: {
+  const doc = new PDFDocument({ autoFirstPage: false, margin: 0, info: {
     Title: invoiceBaseName(invoice, payload),
     Author: 'GestoResto',
-    Subject: 'Fatura processada automaticamente'
+    Subject: 'Fatura'
   }});
   const chunks = [];
   doc.on('data', chunk => chunks.push(chunk));
@@ -92,40 +92,28 @@ async function generateInvoicePdf({ invoice, payload, imageDocuments, outputPath
     doc.on('end', resolve);
     doc.on('error', reject);
   });
-  const processedAt = new Date();
-  const qrState = payload.hasQrCode ? 'OK' : 'Falhou';
 
+  const pad = 20;
   for (const [index, image] of imageDocuments.entries()) {
-    doc.addPage({ size: 'A4', margin: 36 });
+    // Detect image orientation to choose page layout
+    let layout = 'portrait';
+    try {
+      const img = doc.openImage(image.storage_path);
+      if (img.width > img.height * 1.1) layout = 'landscape';
+    } catch { /* fallback to portrait */ }
+
+    doc.addPage({ size: 'A4', layout, margin: 0 });
     const pageWidth = doc.page.width;
     const pageHeight = doc.page.height;
-    const footerHeight = 34;
-    const contentTop = 28;
-    const contentHeight = pageHeight - contentTop - footerHeight - 34;
     try {
-      doc.image(image.storage_path, 28, contentTop, {
-        fit: [pageWidth - 56, contentHeight],
+      doc.image(image.storage_path, pad, pad, {
+        fit: [pageWidth - pad * 2, pageHeight - pad * 2],
         align: 'center',
         valign: 'center'
       });
     } catch (error) {
       doc.fontSize(12).fillColor('#991b1b').text(`Não foi possível inserir a imagem da página ${index + 1}.`, 50, 120);
     }
-    doc
-      .moveTo(36, pageHeight - footerHeight - 8)
-      .lineTo(pageWidth - 36, pageHeight - footerHeight - 8)
-      .strokeColor('#d1d5db')
-      .lineWidth(0.5)
-      .stroke();
-    doc
-      .fontSize(8)
-      .fillColor('#475569')
-      .text(
-        `Processado automaticamente por GestoResto | Estado QR: ${qrState} | ${processedAt.toISOString()} | Nº interno: ${invoice.id} | Página ${index + 1}/${imageDocuments.length}`,
-        36,
-        pageHeight - footerHeight,
-        { width: pageWidth - 72, align: 'center' }
-      );
   }
 
   doc.end();

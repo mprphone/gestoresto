@@ -149,6 +149,115 @@ export const normalizeInvoiceImage = (base64: string): Promise<{ data: string; q
   });
 };
 
+export interface CropProposal {
+  cropX: number;
+  cropY: number;
+  cropW: number;
+  cropH: number;
+  sourceW: number;
+  sourceH: number;
+  confidence: number; // 0–1
+  reason: string;
+}
+
+export const detectDocumentCrop = (canvas: HTMLCanvasElement): CropProposal => {
+  const W = canvas.width;
+  const H = canvas.height;
+  const fallback: CropProposal = { cropX: 0, cropY: 0, cropW: W, cropH: H, sourceW: W, sourceH: H, confidence: 0, reason: 'fallback' };
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx || W === 0 || H === 0) return fallback;
+
+  const pixels = ctx.getImageData(0, 0, W, H);
+  const colProfile = new Float32Array(W);
+  const rowProfile = new Float32Array(H);
+  const step = 3;
+
+  for (let y = 0; y < H; y += step) {
+    for (let x = 0; x < W; x += step) {
+      const i = (y * W + x) * 4;
+      const lum = pixels.data[i] * 0.299 + pixels.data[i + 1] * 0.587 + pixels.data[i + 2] * 0.114;
+      colProfile[x] += lum;
+      rowProfile[y] += lum;
+    }
+  }
+  const colSamples = Math.ceil(H / step) || 1;
+  const rowSamples = Math.ceil(W / step) || 1;
+  for (let x = 0; x < W; x++) colProfile[x] /= colSamples;
+  for (let y = 0; y < H; y++) rowProfile[y] /= rowSamples;
+  for (let x = 1; x < W; x++) if (colProfile[x] === 0) colProfile[x] = colProfile[x - 1];
+  for (let y = 1; y < H; y++) if (rowProfile[y] === 0) rowProfile[y] = rowProfile[y - 1];
+
+  const smoothArr2 = (arr: Float32Array, w: number): Float32Array => {
+    const out = new Float32Array(arr.length);
+    for (let i = 0; i < arr.length; i++) {
+      let s = 0, c = 0;
+      for (let j = Math.max(0, i - w); j <= Math.min(arr.length - 1, i + w); j++) { s += arr[j]; c++; }
+      out[i] = c > 0 ? s / c : arr[i];
+    }
+    return out;
+  };
+  const colSmooth = smoothArr2(colProfile, 25);
+  const rowSmooth = smoothArr2(rowProfile, 25);
+
+  const THRESHOLD = 140;
+  let minX = W - 1, maxX = 0, minY = H - 1, maxY = 0;
+  for (let x = 0; x < W; x++) { if (colSmooth[x] >= THRESHOLD) { minX = x; break; } }
+  for (let x = W - 1; x >= 0; x--) { if (colSmooth[x] >= THRESHOLD) { maxX = x; break; } }
+  for (let y = 0; y < H; y++) { if (rowSmooth[y] >= THRESHOLD) { minY = y; break; } }
+  for (let y = H - 1; y >= 0; y--) { if (rowSmooth[y] >= THRESHOLD) { maxY = y; break; } }
+
+  const dW = maxX - minX;
+  const dH = maxY - minY;
+  if (dW <= 0 || dH <= 0) return { ...fallback, reason: 'documento não detetado' };
+
+  const leftM = minX / W;
+  const rightM = (W - maxX) / W;
+  const topM = minY / H;
+  const bottomM = (H - maxY) / H;
+  const areaRatio = (dW * dH) / (W * H);
+  const marginsOk = leftM > 0.04 && rightM > 0.04 && topM > 0.03 && bottomM > 0.03;
+  const areaOk = areaRatio > 0.12 && areaRatio < 0.88;
+  const hasCrop = areaRatio < 0.88;
+
+  let confidence = 0;
+  const notes: string[] = [];
+  if (marginsOk) { confidence += 0.5; notes.push('margens'); }
+  if (areaOk) { confidence += 0.3; notes.push('área'); }
+  if (hasCrop) { confidence += 0.2; notes.push('recorte'); }
+
+  const padX = Math.round(W * 0.06);
+  const padY = Math.round(H * 0.06);
+  const cropX = Math.max(0, minX - padX);
+  const cropY = Math.max(0, minY - padY);
+  const cropW = Math.min(W - cropX, dW + padX * 2);
+  const cropH = Math.min(H - cropY, dH + padY * 2);
+
+  return { cropX, cropY, cropW, cropH, sourceW: W, sourceH: H, confidence, reason: notes.join('+') };
+};
+
+export const normalizeWithoutCrop = (base64: string): Promise<{ data: string; quality: PageQuality; width: number; height: number }> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64;
+    img.onerror = () => resolve({ data: base64.split(',')[1] || base64, quality: { sharpness: 0, brightness: 0, isReadable: false, hasQrCode: false }, width: 0, height: 0 });
+    img.onload = () => {
+      const MAX_WIDTH = 2000;
+      const scale = Math.min(1, MAX_WIDTH / img.width);
+      const out = document.createElement('canvas');
+      out.width = Math.round(img.width * scale);
+      out.height = Math.round(img.height * scale);
+      const ctx = out.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, out.width, out.height);
+        ctx.filter = 'contrast(1.08) brightness(1.03)';
+        ctx.drawImage(img, 0, 0, out.width, out.height);
+      }
+      resolve({ data: out.toDataURL('image/jpeg', 0.92).split(',')[1], quality: analyzeCanvasQuality(out), width: out.width, height: out.height });
+    };
+  });
+};
+
 export const scanQrPayloads = async (base64Pages: string[]) => {
   const BarcodeDetectorCtor = (window as any).BarcodeDetector;
 

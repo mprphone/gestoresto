@@ -29,6 +29,12 @@ export interface InvoiceExtractedData {
     imageQualityOk: boolean;
     complianceNotes?: string;
     isMissingPages: boolean;
+    qrCodeText?: string;
+    qrTotalAmount?: number;
+    calculatedLinesTotal?: number;
+    totalValidationStatus?: 'VALIDO' | 'ALERTA' | 'NAO_VERIFICADO';
+    totalValidationNotes?: string;
+    confidenceScore?: number;
   };
 }
 

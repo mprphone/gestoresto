@@ -12,7 +12,11 @@ restaurantProfileRouter.get('/', async (_req, res, next) => {
       order by updated_at desc
       limit 1
     `);
-    res.json({ data: result.rows[0] || null });
+    const row = result.rows[0] || null;
+    if (row) {
+      row.notificationEmails = row.notification_emails || [];
+    }
+    res.json({ data: row });
   } catch (error) {
     next(error);
   }
@@ -26,12 +30,13 @@ restaurantProfileRouter.post('/', async (req, res, next) => {
       return;
     }
 
+    const notifEmails = Array.isArray(profile.notificationEmails) ? profile.notificationEmails : [];
     const result = await query(`
       insert into restaurant_profile (
-        id, name, nif, legal_name, email, phone, address, postal_code, city, country, is_active
+        id, name, nif, legal_name, email, phone, address, postal_code, city, country, is_active, notification_emails
       )
       values (
-        coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, coalesce($10, 'Portugal'), true
+        coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, coalesce($10, 'Portugal'), true, $11
       )
       on conflict (is_active) where is_active do update set
         name = excluded.name,
@@ -42,7 +47,8 @@ restaurantProfileRouter.post('/', async (req, res, next) => {
         address = excluded.address,
         postal_code = excluded.postal_code,
         city = excluded.city,
-        country = excluded.country
+        country = excluded.country,
+        notification_emails = excluded.notification_emails
       returning *
     `, [
       profile.id,
@@ -54,7 +60,8 @@ restaurantProfileRouter.post('/', async (req, res, next) => {
       profile.address || null,
       profile.postalCode || null,
       profile.city || null,
-      profile.country || 'Portugal'
+      profile.country || 'Portugal',
+      notifEmails
     ]);
 
     res.status(201).json(result.rows[0]);

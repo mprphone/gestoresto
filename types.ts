@@ -44,6 +44,7 @@ export interface RestaurantProfile {
   postalCode?: string;
   city?: string;
   country?: string;
+  notificationEmails?: string[];
 }
 
 export type AppUserRole = 'admin' | 'funcionario' | 'compras' | 'cozinha' | 'financeiro';

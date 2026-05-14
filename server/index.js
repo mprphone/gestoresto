@@ -89,3 +89,8 @@ server.ref();
 ensureDefaultAdminUser().catch(error => {
   console.error('Failed to ensure default admin user', error);
 });
+
+pool.query(`
+  alter table restaurant_profile
+  add column if not exists notification_emails text[] not null default '{}'
+`).catch(() => { /* column may already exist */ });
