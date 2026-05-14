@@ -89,9 +89,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const checkQrBuyerNif = (qr: string | PortugueseQrData): string | null => {
     const parsed = typeof qr === 'string' ? parsePortugueseQrData(qr) : qr;
     const buyerNif = parsed.customerNif || '';
-    if (!buyerNif) return null;
-    if (buyerNif === '999999990') return 'Fatura para Consumidor Final — solicite fatura com o NIF do restaurante';
     const restNif = (restaurantProfile?.nif || '').replace(/\D/g, '');
+    if (!buyerNif && restNif) return `O QR não tem NIF do comprador/empresa. NIF esperado: ${restNif}. Solicite fatura com o NIF da empresa/restaurante`;
+    if (!buyerNif) return null;
+    if (buyerNif === '999999990') return `Fatura para Consumidor Final. NIF esperado: ${restNif || 'NIF da empresa/restaurante'}`;
     if (restNif && buyerNif !== restNif) return `NIF do comprador no QR (${buyerNif}) não coincide com o NIF da empresa/restaurante (${restNif})`;
     return null;
   };
@@ -628,10 +629,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       {qrLiveDetected && qrData && !liveQrNifError && (
         <div className="absolute top-20 left-4 right-4 z-20 p-3 rounded-2xl bg-emerald-500/95 text-white text-[10px] font-black uppercase space-y-1">
           <div className="flex items-center gap-2">
-            <Check size={14} className="shrink-0" /> QR fiscal lido e NIF validado
+            <Check size={14} className="shrink-0" /> QR fiscal lido e NIF da empresa validado
           </div>
           <p className="opacity-85">
-            Forn. {qrData.supplierNif || '-'} · Cliente {qrData.customerNif || '-'} · Total {qrData.totalAmount ? `€ ${qrData.totalAmount.toFixed(2)}` : '-'}
+            Forn. {qrData.supplierNif || '-'} · Empresa {qrData.customerNif || 'sem NIF'} · Total {qrData.totalAmount ? `€ ${qrData.totalAmount.toFixed(2)}` : '-'}
           </p>
         </div>
       )}
@@ -806,7 +807,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
                       <p>Fornecedor: <span className="font-black">{qrData.supplierNif || '-'}</span></p>
-                      <p>Comprador: <span className="font-black">{qrData.customerNif || '-'}</span></p>
+                      <p>Empresa: <span className="font-black">{qrData.customerNif || 'sem NIF'}</span></p>
                       <p>Documento: <span className="font-black">{qrData.documentNumber || '-'}</span></p>
                       <p>Total: <span className="font-black">{qrData.totalAmount ? `€ ${qrData.totalAmount.toFixed(2)}` : '-'}</span></p>
                       {qrData.atcud && <p className="col-span-2">ATCUD: <span className="font-black">{qrData.atcud}</span></p>}
@@ -859,7 +860,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-bold">
                           <p>Fornecedor<br /><span className="font-black">{qrData.supplierNif || '-'}</span></p>
-                          <p>Comprador<br /><span className="font-black">{qrData.customerNif || '-'}</span></p>
+                          <p>Empresa<br /><span className="font-black">{qrData.customerNif || 'sem NIF'}</span></p>
                           <p>Documento<br /><span className="font-black">{qrData.documentNumber || '-'}</span></p>
                           <p>Total QR<br /><span className="font-black">{qrData.totalAmount ? `€ ${qrData.totalAmount.toFixed(2)}` : '-'}</span></p>
                         </div>
