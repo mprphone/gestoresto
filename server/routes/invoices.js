@@ -403,7 +403,6 @@ invoicesRouter.post('/', async (req, res, next) => {
           $23, $24, $25, $26, $27,
           $28, $29
         )
-        on conflict (restaurant_id, supplier_nif, doc_number) where restaurant_id is not null do nothing
         returning *
       `, [
         req.restaurantId,
@@ -555,46 +554,83 @@ invoicesRouter.post('/', async (req, res, next) => {
         }
 
         if (line.originalName && line.productId) {
-          const alias = await client.query(`
-            insert into product_aliases (
-              supplier_id, product_id, supplier_item_name, supplier_item_code,
-              supplier_unit, product_unit, conversion_factor, confidence, last_seen_at
-            )
-            values ($1, $2, $3, $4, $5, $6, coalesce($7, 1), coalesce($8, 100), now())
-            on conflict (supplier_id, normalized_supplier_item_name, coalesce(supplier_item_code, '')) do update set
-              product_id = excluded.product_id,
-              supplier_unit = excluded.supplier_unit,
-              product_unit = excluded.product_unit,
-              conversion_factor = excluded.conversion_factor,
-              confidence = excluded.confidence,
-              last_seen_at = now()
-            returning *
-          `, [
-            supplierId,
-            line.productId,
-            line.originalName,
-            line.supplierItemCode || null,
-            line.unitOriginal,
-            line.unitStock,
-            line.conversionFactor || 1,
-            line.confidence || 100
-          ]);
+          const existingAlias = await client.query(`
+            select *
+            from product_aliases
+            where supplier_id is not distinct from $1
+              and normalized_supplier_item_name = normalize_search_text($2)
+              and coalesce(supplier_item_code, '') = coalesce($3, '')
+            order by created_at asc nulls last, id asc
+            limit 1
+          `, [supplierId, line.originalName, line.supplierItemCode || null]);
+          const alias = existingAlias.rows[0]
+            ? await client.query(`
+                update product_aliases
+                set product_id = $1,
+                    supplier_unit = $2,
+                    product_unit = $3,
+                    conversion_factor = coalesce($4, 1),
+                    confidence = coalesce($5, 100),
+                    last_seen_at = now()
+                where id = $6
+                returning *
+              `, [
+                line.productId,
+                line.unitOriginal,
+                line.unitStock,
+                line.conversionFactor || 1,
+                line.confidence || 100,
+                existingAlias.rows[0].id
+              ])
+            : await client.query(`
+                insert into product_aliases (
+                  supplier_id, product_id, supplier_item_name, supplier_item_code,
+                  supplier_unit, product_unit, conversion_factor, confidence, last_seen_at
+                )
+                values ($1, $2, $3, $4, $5, $6, coalesce($7, 1), coalesce($8, 100), now())
+                returning *
+              `, [
+                supplierId,
+                line.productId,
+                line.originalName,
+                line.supplierItemCode || null,
+                line.unitOriginal,
+                line.unitStock,
+                line.conversionFactor || 1,
+                line.confidence || 100
+              ]);
           await audit(client, req, 'learn_alias', 'product_aliases', alias.rows[0].id, null, alias.rows[0]);
 
           if (line.unitOriginal && line.unitStock && line.unitOriginal !== line.unitStock) {
-            await client.query(`
-              insert into product_unit_conversions (product_id, supplier_id, from_unit, to_unit, factor, notes)
-              values ($1, $2, $3, $4, coalesce($5, 1), $6)
-              on conflict (product_id, coalesce(supplier_id, '00000000-0000-0000-0000-000000000000'::uuid), from_unit, to_unit)
-              do update set factor = excluded.factor, notes = excluded.notes
-            `, [
+            const existingConversion = await client.query(`
+              select id
+              from product_unit_conversions
+              where product_id = $1
+                and supplier_id is not distinct from $2
+                and from_unit = $3
+                and to_unit = $4
+              limit 1
+            `, [line.productId, supplierId, line.unitOriginal, line.unitStock]);
+            const conversionValues = [
               line.productId,
               supplierId,
               line.unitOriginal,
               line.unitStock,
               line.conversionFactor || 1,
               `Aprendido via fatura ${payload.docNumber || ''}`
-            ]);
+            ];
+            if (existingConversion.rows[0]) {
+              await client.query(`
+                update product_unit_conversions
+                set factor = $1, notes = $2
+                where id = $3
+              `, [line.conversionFactor || 1, `Aprendido via fatura ${payload.docNumber || ''}`, existingConversion.rows[0].id]);
+            } else {
+              await client.query(`
+                insert into product_unit_conversions (product_id, supplier_id, from_unit, to_unit, factor, notes)
+                values ($1, $2, $3, $4, coalesce($5, 1), $6)
+              `, conversionValues);
+            }
           }
         }
 
