@@ -46,6 +46,7 @@ import {
   LogOut,
   ClipboardCheck,
   Receipt,
+  Settings
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -427,6 +428,37 @@ const App: React.FC = () => {
     );
   }
 
+  if (isAdmin && activeTab === 'companies') {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        {notice && <SystemNotice type={notice.type} message={notice.message} onClose={() => setNotice(null)} />}
+        <header className="bg-white/90 backdrop-blur-md border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50">
+          <div className="flex items-center gap-3">
+            <UtensilsCrossed className="text-orange-500 w-7 h-7" />
+            <div>
+              <h1 className="font-black text-lg tracking-tighter uppercase italic text-slate-900">GestoRestô</h1>
+              <p className="text-[10px] font-black text-orange-500 uppercase tracking-widest">{currentRestaurant.name}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setActiveTab('dash')}
+              className="px-4 py-3 rounded-2xl bg-slate-900 text-white text-xs font-black uppercase hover:bg-orange-500 transition-colors"
+            >
+              Voltar ao restaurante
+            </button>
+            <button onClick={handleLogout} className="px-4 py-3 rounded-2xl border border-slate-200 text-slate-500 text-xs font-black uppercase hover:text-slate-900 transition-colors">
+              Sair
+            </button>
+          </div>
+        </header>
+        <main className="p-6 md:p-10">
+          <CompanyAdmin />
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
       {notice && <SystemNotice type={notice.type} message={notice.message} onClose={() => setNotice(null)} />}
@@ -454,6 +486,14 @@ const App: React.FC = () => {
           </nav>
         <div className="p-6 border-t border-slate-800">
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{currentUser.name}</p>
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab('companies')}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all font-bold text-sm mb-1 text-slate-500 hover:text-white hover:bg-slate-800"
+            >
+              <Settings size={16} /> Administração
+            </button>
+          )}
           <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all font-bold text-sm">
             <LogOut size={18} /> Sair
           </button>
@@ -471,8 +511,6 @@ const App: React.FC = () => {
               user={currentUser}
               currentRestaurant={currentRestaurant}
               canSwitch={userRestaurants.length > 1}
-              canAdmin={isAdmin}
-              onAdmin={() => setActiveTab('companies')}
               onSwitchRestaurant={() => setCurrentRestaurant(null)}
               onLogout={handleLogout}
             />
@@ -503,7 +541,6 @@ const App: React.FC = () => {
           )}
           {activeTab === 'equiv' && <EquivalencesManagement products={products} suppliers={suppliers} aliases={productAliases} onChanged={refreshData} />}
           {activeTab === 'rep' && <Reports products={products} movements={movements} />}
-          {isAdmin && activeTab === 'companies' && <CompanyAdmin />}
           </>}
         </div>
 
