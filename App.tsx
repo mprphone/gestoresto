@@ -415,18 +415,21 @@ const App: React.FC = () => {
           </nav>
         ) : (
           <nav className="flex-1 px-6 space-y-1">
+            {currentUser.role === 'admin' && (
+              <>
+                <NavItem icon={<Building2 />} label="Empresas & Restaurantes" active={activeTab === 'companies'} onClick={() => setActiveTab('companies')} />
+                <div className="border-t border-slate-800 my-3" />
+              </>
+            )}
             <NavItem icon={<LayoutDashboard />} label="Dashboard" active={activeTab === 'dash'} onClick={() => setActiveTab('dash')} />
             <NavItem icon={<Package />} label="Stock Central" active={activeTab === 'inv'} onClick={() => setActiveTab('inv')} />
             <NavItem icon={<ArrowRightLeft />} label="Saída / Quebra" active={activeTab === 'move'} onClick={() => setActiveTab('move')} />
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-8 mb-2 px-5 text-center">Gestão IA</p>
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-6 mb-2 px-5 text-center">Gestão IA</p>
             <NavItem icon={<PlusCircle />} label="Nova Fatura" active={activeTab === 'entry'} onClick={() => setActiveTab('entry')} />
             <NavItem icon={<ClipboardCheck />} label="Rever Faturas" active={activeTab === 'review'} onClick={() => setActiveTab('review')} badge={pendingReviewCount} />
             <NavItem icon={<Receipt />} label="Despesas" active={activeTab === 'expenses'} onClick={() => setActiveTab('expenses')} />
             <NavItem icon={<Wallet />} label="Pagamentos" active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} />
             <NavItem icon={<Building2 />} label="Fornecedores" active={activeTab === 'suppliers'} onClick={() => setActiveTab('suppliers')} />
-            <NavItem icon={<Store />} label="Restaurante" active={activeTab === 'restaurant'} onClick={() => setActiveTab('restaurant')} />
-            {currentUser.role === 'admin' && <NavItem icon={<Users />} label="Funcionários" active={activeTab === 'employees'} onClick={() => setActiveTab('employees')} />}
-            {currentUser.role === 'admin' && <NavItem icon={<Building2 />} label="Empresas" active={activeTab === 'companies'} onClick={() => setActiveTab('companies')} />}
             <NavItem icon={<BookOpen />} label="Catálogo" active={activeTab === 'catalog'} onClick={() => setActiveTab('catalog')} />
             <NavItem icon={<Link2 />} label="Equivalências" active={activeTab === 'equiv'} onClick={() => setActiveTab('equiv')} />
             <NavItem icon={<BarChart3 />} label="Análises" active={activeTab === 'rep'} onClick={() => setActiveTab('rep')} />
