@@ -251,6 +251,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   };
 
   const processAllPages = async (currentPages: string[], currentQrPayloads = qrPayloads) => {
+    autoSubmitRef.current = false;
     setIsProcessing(true);
     setProcessingError(null);
     try {
@@ -741,11 +742,6 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const allItemsGreen = extractedData
     ? extractedData.items.every((item, idx) => Boolean(mapping[idx]) && (matchConfidences[idx] || 0) >= 90)
     : false;
-  const creditStockIsEnough = !extractedData || !isCreditDocument || extractedData.items.every((item, idx) => {
-    const product = products.find(p => p.id === mapping[idx]) || autoCreatedProducts[mapping[idx]];
-    const quantity = item.quantity * (conversionFactors[idx] || 1);
-    return Number(product?.currentStock || 0) >= quantity;
-  });
   const autoAcceptReady = Boolean(
     extractedData &&
     qrData &&
@@ -755,8 +751,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     !nifMismatch &&
     extractedData.digitalCompliance?.totalValidationStatus === 'VALIDO' &&
     (extractedData.digitalCompliance?.confidenceScore || 0) >= 90 &&
-    allItemsGreen &&
-    creditStockIsEnough
+    allItemsGreen
   );
 
   useEffect(() => {
