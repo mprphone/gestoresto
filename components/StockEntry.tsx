@@ -106,23 +106,24 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     image.src = dataUrl;
   });
 
-  const prepareOcrPagesForAi = async (sourcePages: string[]) => {
+  const prepareOcrPagesForAi = async (sourcePages: string[], forceDetailSlices = false) => {
     const ocrPages: string[] = [];
     for (const page of sourcePages) {
       const dataUrl = page.startsWith('data:') ? page : `data:image/jpeg;base64,${page}`;
       const { width, height, image } = await imageSizeFromDataUrl(dataUrl);
       const ratio = height / Math.max(1, width);
-      if (ratio <= 2.15) {
+      if (ratio <= 2.15 && !forceDetailSlices) {
         ocrPages.push(dataUrl);
         continue;
       }
 
-      // Talões compridos ficam bons para arquivo, mas as linhas chegam pequenas à IA.
-      // Mantemos a foto original guardada e enviamos close-ups verticais só para OCR.
-      const sliceHeight = Math.round(width * 1.65);
-      const overlap = Math.round(sliceHeight * 0.16);
+      ocrPages.push(dataUrl);
+      // Talões compridos e A4 fotografado de longe ficam bons para arquivo, mas as linhas
+      // podem chegar pequenas à IA. Mantemos a foto original e enviamos close-ups só para OCR.
+      const sliceHeight = ratio > 2.15 ? Math.round(width * 1.65) : Math.round(height * 0.42);
+      const overlap = Math.round(sliceHeight * 0.18);
       const step = Math.max(1, sliceHeight - overlap);
-      const maxSlices = 6;
+      const maxSlices = ratio > 2.15 ? 6 : 4;
       let sliceCount = 0;
       for (let y = 0; y < height && sliceCount < maxSlices; y += step) {
         const h = Math.min(sliceHeight, height - y);
@@ -295,11 +296,11 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setIsProcessing(true);
     setProcessingError(null);
     try {
-      const ocrPages = await prepareOcrPagesForAi(currentPages);
+      const ocrPages = await prepareOcrPagesForAi(currentPages, currentQrPayloads.length > 0);
       const data = await processInvoiceImage(ocrPages);
       if (!data || data.items.length === 0) {
         setProcessingError(currentQrPayloads.length > 0
-          ? 'O QR fiscal foi lido, mas as linhas dos artigos ficaram pequenas demais para estruturar com segurança. Tente fotografar o talão por partes ou mais perto.'
+          ? 'O QR fiscal foi lido, mas não consegui estruturar as linhas dos artigos. Tente aproximar mais a folha ou fotografar só a zona da tabela.'
           : 'A IA não conseguiu ler artigos nesta fotografia. Tente uma foto mais próxima, nítida e com a fatura completa.');
         return;
       }
