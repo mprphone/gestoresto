@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Building2, Store, Users, Plus, X, Check, ChevronLeft, ChevronRight, Mail, Hash, Save, Pencil, UserPlus, UserCheck } from 'lucide-react';
 import { Company, Restaurant, AppUser } from '../types';
 import {
-  listCompanies, createCompany,
+  listCompanies, createCompany, updateCompany,
   listRestaurants, createRestaurant, updateRestaurant,
   listRestaurantUsers, listAvailableUsers,
   addUserToRestaurant, removeUserFromRestaurant
@@ -313,7 +313,7 @@ const CompanyDetail: React.FC<CompanyDetailProps> = ({ company, onBack }) => {
   return (
     <div className="space-y-6">
       {/* Breadcrumb header */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <button onClick={onBack} className="flex items-center gap-2 text-xs font-black text-slate-400 hover:text-orange-500 transition-colors uppercase">
           <ChevronLeft size={16} /> Empresas
         </button>
@@ -327,6 +327,9 @@ const CompanyDetail: React.FC<CompanyDetailProps> = ({ company, onBack }) => {
             {company.nif && <p className="text-[9px] font-bold text-slate-400">NIF {company.nif}</p>}
           </div>
         </div>
+        <span className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-100 text-[9px] font-black text-emerald-600 uppercase tracking-widest">
+          Empresa ativa
+        </span>
       </div>
 
       {error && <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-red-700 text-xs font-bold">{error}</div>}
@@ -399,6 +402,9 @@ const CompanyAdmin: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [editingCompany, setEditingCompany] = useState<Company | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editNif, setEditNif] = useState('');
   const [newName, setNewName] = useState('');
   const [newNif, setNewNif] = useState('');
   const [saving, setSaving] = useState(false);
@@ -422,6 +428,25 @@ const CompanyAdmin: React.FC = () => {
     finally { setSaving(false); }
   };
 
+  const startEdit = (company: Company) => {
+    setEditingCompany(company);
+    setEditName(company.name);
+    setEditNif(company.nif || '');
+    setShowNew(false);
+  };
+
+  const handleEdit = async () => {
+    if (!editingCompany || !editName.trim()) return;
+    setSaving(true);
+    try {
+      const saved = await updateCompany(editingCompany.id, { name: editName, nif: editNif || undefined });
+      setCompanies(prev => prev.map(company => company.id === saved.id ? saved : company));
+      if (selectedCompany?.id === saved.id) setSelectedCompany(saved);
+      setEditingCompany(null);
+    } catch (e: any) { setError(e.message); }
+    finally { setSaving(false); }
+  };
+
   // Drill into company
   if (selectedCompany) {
     return (
@@ -440,7 +465,7 @@ const CompanyAdmin: React.FC = () => {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-black uppercase italic tracking-tight">Empresas</h2>
-          <p className="text-sm text-slate-400 font-bold mt-1">Clique numa empresa para gerir os seus restaurantes e utilizadores.</p>
+          <p className="text-sm text-slate-400 font-bold mt-1">Clique numa empresa para entrar. Use Editar apenas para alterar os dados.</p>
         </div>
         <button onClick={() => setShowNew(true)}
           className="shrink-0 px-4 py-3 bg-slate-900 text-white rounded-2xl font-black uppercase text-xs hover:bg-orange-500 flex items-center gap-2 transition-all shadow-lg">
@@ -455,21 +480,56 @@ const CompanyAdmin: React.FC = () => {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {companies.map(company => (
-            <button key={company.id} onClick={() => setSelectedCompany(company)}
-              className="group bg-white border border-slate-200 rounded-[2rem] p-8 text-left hover:border-orange-300 hover:shadow-xl transition-all active:scale-95">
-              <div className="flex items-start justify-between mb-6">
-                <div className="p-4 rounded-2xl bg-slate-900 text-white group-hover:bg-orange-500 transition-colors">
+            <div key={company.id}
+              onClick={() => setSelectedCompany(company)}
+              className="group bg-white border border-slate-200 rounded-[2rem] p-8 text-left hover:border-orange-300 hover:shadow-xl transition-all active:scale-95 cursor-pointer">
+              <div className="flex items-start justify-between gap-3 mb-6">
+                <div className="p-4 rounded-2xl bg-slate-900 text-white group-hover:bg-orange-500 transition-colors shrink-0">
                   <Building2 size={26} />
                 </div>
-                <ChevronRight size={18} className="text-slate-300 group-hover:text-orange-400 mt-1 transition-colors" />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={(event) => { event.stopPropagation(); startEdit(company); }}
+                    className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-[10px] font-black text-slate-500 uppercase hover:border-orange-300 hover:text-orange-500 transition-all flex items-center gap-1.5"
+                  >
+                    <Pencil size={12} /> Editar
+                  </button>
+                  <ChevronRight size={18} className="text-slate-300 group-hover:text-orange-400 transition-colors" />
+                </div>
               </div>
               <h3 className="font-black text-slate-900 text-xl leading-tight">{company.name}</h3>
               {company.nif && <p className="text-[10px] font-bold text-slate-400 mt-1">NIF {company.nif}</p>}
               <p className="text-[9px] font-black text-slate-400 mt-3 uppercase tracking-widest">
                 {company.restaurantCount ?? 0} estabelecimento{(company.restaurantCount ?? 0) !== 1 ? 's' : ''}
               </p>
-            </button>
+              <p className="text-[9px] font-black text-orange-500 mt-5 uppercase tracking-widest">Entrar na empresa</p>
+            </div>
           ))}
+
+          {editingCompany && (
+            <div className="bg-white border-2 border-slate-900 rounded-[2rem] p-8 space-y-4">
+              <p className="text-[9px] font-black text-slate-900 uppercase tracking-widest">Editar Empresa</p>
+              <div className="space-y-3">
+                <input value={editName} onChange={e => setEditName(e.target.value)}
+                  autoFocus onKeyDown={e => e.key === 'Enter' && handleEdit()}
+                  placeholder="Nome da empresa *"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-orange-500/20" />
+                <input value={editNif} onChange={e => setEditNif(e.target.value)}
+                  placeholder="NIF (opcional)"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none" />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={handleEdit} disabled={!editName.trim() || saving}
+                  className="flex-1 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase hover:bg-orange-500 disabled:opacity-40 transition-all flex items-center justify-center gap-2 shadow-md">
+                  <Check size={14} /> {saving ? 'A guardar...' : 'Guardar'}
+                </button>
+                <button onClick={() => setEditingCompany(null)}
+                  className="py-3 px-4 border border-slate-200 text-slate-500 rounded-xl text-xs font-black uppercase hover:bg-slate-50 transition-all">
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* New company card */}
           {showNew ? (
