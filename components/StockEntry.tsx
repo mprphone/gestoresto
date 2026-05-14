@@ -240,13 +240,15 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           const fields: Record<string, string> = {};
           payload.split('*').forEach(p => { const i = p.indexOf(':'); if (i > 0) fields[p.slice(0, i)] = p.slice(i + 1); });
           const b = (fields['B'] || '').replace(/\D/g, '');
-          if (b && b !== '999999990') return b; // 999999990 = consumidor final
+          if (b) return b;
         }
         return null;
       })();
       const restaurantNif = (restaurantProfile?.nif || '').replace(/\D/g, '');
-      if (qrBuyerNif && restaurantNif && qrBuyerNif !== restaurantNif) {
-        setNifMismatch(`NIF do comprador no QR (${qrBuyerNif}) não coincide com o NIF do restaurante (${restaurantNif}). Confirme se é a fatura correta.`);
+      if (qrBuyerNif === '999999990') {
+        setNifMismatch('Esta fatura é emitida para Consumidor Final e não pode ser registada. Solicite uma fatura com o NIF do restaurante.');
+      } else if (qrBuyerNif && restaurantNif && qrBuyerNif !== restaurantNif) {
+        setNifMismatch(`O NIF do comprador no QR (${qrBuyerNif}) não coincide com o NIF do restaurante (${restaurantNif}). Não é possível registar esta fatura.`);
       } else {
         setNifMismatch(null);
       }
@@ -799,7 +801,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                     </div>
                     <div className="sticky bottom-0 z-30 -mx-4 -mb-4 sm:mx-0 sm:mb-0 p-4 sm:p-0 bg-white/95 sm:bg-transparent backdrop-blur border-t sm:border-t pt-4 sm:pt-8 flex flex-col md:flex-row justify-between items-center gap-3 sm:gap-6">
                        <div className="hidden sm:block"><p className="text-[10px] font-black text-slate-400 uppercase">Total do Documento</p><p className="text-4xl font-black italic text-slate-900">€ {extractedData.totalInvoiceAmount.toFixed(2)}</p></div>
-                       <button onClick={confirmEntry} className={`w-full md:w-auto px-8 sm:px-12 py-4 sm:py-5 rounded-2xl sm:rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-orange-500 text-white hover:bg-orange-600 sm:bg-slate-900 sm:hover:bg-orange-500'}`} disabled={isDuplicate}>Confirmar Entrada <Check size={20} className="inline ml-2" /></button>
+                       <button onClick={confirmEntry} className={`w-full md:w-auto px-8 sm:px-12 py-4 sm:py-5 rounded-2xl sm:rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate || nifMismatch ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-orange-500 text-white hover:bg-orange-600 sm:bg-slate-900 sm:hover:bg-orange-500'}`} disabled={!!(isDuplicate || nifMismatch)}>Confirmar Entrada <Check size={20} className="inline ml-2" /></button>
                     </div>
                  </div>
                </div>
