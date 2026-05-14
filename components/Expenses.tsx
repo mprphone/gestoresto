@@ -5,19 +5,19 @@ import {
   Zap, Droplets, Flame, Wifi, Shield, Home, Calculator, MoreHorizontal,
   Camera, Upload, Check, RefreshCcw, X, Euro, QrCode, Pencil
 } from 'lucide-react';
-import { apiPost, apiPostForm } from '../data/apiClient';
+import { apiPost, apiPostForm, apiGet } from '../data/apiClient';
 import { RestaurantProfile } from '../types';
 
-const CATEGORIES = [
-  { id: 'Eletricidade',      label: 'Eletricidade',      icon: Zap,          color: 'bg-yellow-50 text-yellow-600 border-yellow-200' },
-  { id: 'Água',              label: 'Água',              icon: Droplets,     color: 'bg-blue-50 text-blue-600 border-blue-200' },
-  { id: 'Gás',               label: 'Gás',               icon: Flame,        color: 'bg-orange-50 text-orange-600 border-orange-200' },
-  { id: 'Telecomunicações',  label: 'Telecom / Internet',icon: Wifi,         color: 'bg-indigo-50 text-indigo-600 border-indigo-200' },
-  { id: 'Seguros',           label: 'Seguros',           icon: Shield,       color: 'bg-teal-50 text-teal-600 border-teal-200' },
-  { id: 'Rendas',            label: 'Rendas',            icon: Home,         color: 'bg-slate-100 text-slate-600 border-slate-200' },
-  { id: 'Contabilidade',     label: 'Contabilidade',     icon: Calculator,   color: 'bg-purple-50 text-purple-600 border-purple-200' },
-  { id: 'Outros',            label: 'Outros',            icon: MoreHorizontal, color: 'bg-slate-50 text-slate-500 border-slate-200' },
-];
+const CATEGORY_UI: Record<string, { icon: React.ElementType; color: string }> = {
+  'Eletricidade':     { icon: Zap,             color: 'bg-yellow-50 text-yellow-600 border-yellow-200' },
+  'Água':             { icon: Droplets,        color: 'bg-blue-50 text-blue-600 border-blue-200' },
+  'Gás':              { icon: Flame,           color: 'bg-orange-50 text-orange-600 border-orange-200' },
+  'Telecomunicações': { icon: Wifi,            color: 'bg-indigo-50 text-indigo-600 border-indigo-200' },
+  'Seguros':          { icon: Shield,          color: 'bg-teal-50 text-teal-600 border-teal-200' },
+  'Rendas':           { icon: Home,            color: 'bg-slate-100 text-slate-600 border-slate-200' },
+  'Contabilidade':    { icon: Calculator,      color: 'bg-purple-50 text-purple-600 border-purple-200' },
+  'Outros':           { icon: MoreHorizontal,  color: 'bg-slate-50 text-slate-500 border-slate-200' },
+};
 
 // Parse Portuguese AT QR code fields (A:NIF B:NIF-cliente D:tipo F:data G:nº-doc H:ATCUD O:total)
 function parseATQR(text: string) {
@@ -61,6 +61,13 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
   const captureRef      = useRef<() => void>();
 
   // Form state
+  const [expenseCategories, setExpenseCategories] = useState<{id: string; name: string}[]>([]);
+  useEffect(() => {
+    apiGet<{data: {id: string; name: string}[]}>('/api/expense-categories')
+      .then(r => setExpenseCategories(r.data))
+      .catch(() => setExpenseCategories(Object.entries(CATEGORY_UI).map(([id]) => ({ id, name: id }))));
+  }, []);
+
   const [category,    setCategory]    = useState('');
   const [supplier,    setSupplier]    = useState('');
   const [nif,         setNif]         = useState('');
@@ -332,14 +339,15 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
       <div className="bg-white rounded-[2.5rem] p-6 border border-slate-200 shadow-sm space-y-4">
         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">1 · Categoria</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {CATEGORIES.map(cat => {
-            const Icon = cat.icon;
+          {expenseCategories.map(cat => {
+            const ui = CATEGORY_UI[cat.id] ?? { icon: MoreHorizontal, color: 'bg-slate-50 text-slate-500 border-slate-200' };
+            const Icon = ui.icon;
             const active = category === cat.id;
             return (
               <button key={cat.id} onClick={() => setCategory(cat.id)}
-                className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all text-center ${active ? cat.color + ' border-current shadow-md' : 'bg-white border-slate-100 text-slate-400 hover:border-slate-300'}`}>
+                className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all text-center ${active ? ui.color + ' border-current shadow-md' : 'bg-white border-slate-100 text-slate-400 hover:border-slate-300'}`}>
                 <Icon size={22} />
-                <span className="text-[9px] font-black uppercase leading-tight">{cat.label}</span>
+                <span className="text-[9px] font-black uppercase leading-tight">{cat.name}</span>
               </button>
             );
           })}

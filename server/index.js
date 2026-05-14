@@ -19,6 +19,7 @@ import { pushRouter } from './routes/push.js';
 import { reviewRouter } from './routes/review.js';
 import { companiesRouter } from './routes/companies.js';
 import { restaurantsRouter } from './routes/restaurants.js';
+import { expenseCategoriesRouter } from './routes/expenseCategories.js';
 import { runMigrations } from './migrate.js';
 
 const app = express();
@@ -80,6 +81,7 @@ app.use('/api/push', pushRouter);
 app.use('/api/review', reviewRouter);
 app.use('/api/companies', companiesRouter);
 app.use('/api/restaurants', restaurantsRouter);
+app.use('/api/expense-categories', expenseCategoriesRouter);
 
 app.use((error, _req, res, _next) => {
   console.error(error);

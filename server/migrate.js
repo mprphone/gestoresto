@@ -1,6 +1,15 @@
 import { query, withTransaction } from './db.js';
 
 export async function runMigrations() {
+  // ── 0. Enum additions ────────────────────────────────────────────────────────
+  await query(`
+    do $$ begin
+      if not exists (select 1 from pg_enum where enumlabel = 'gerente' and enumtypid = 'app_role'::regtype) then
+        alter type app_role add value 'gerente';
+      end if;
+    end $$
+  `).catch(() => {});
+
   // ── 1. New tables ────────────────────────────────────────────────────────────
   await query(`
     create table if not exists companies (
@@ -51,6 +60,31 @@ export async function runMigrations() {
       unique(user_id, restaurant_id)
     )
   `);
+
+  await query(`
+    create table if not exists expense_categories (
+      id          text primary key,
+      name        text not null,
+      sort_order  int not null default 0,
+      is_active   boolean not null default true,
+      created_at  timestamptz not null default now()
+    )
+  `);
+
+  await query(`
+    insert into expense_categories (id, name, sort_order) values
+      ('Eletricidade',     'Eletricidade',       1),
+      ('Água',             'Água',               2),
+      ('Gás',              'Gás',                3),
+      ('Telecomunicações', 'Telecom / Internet',  4),
+      ('Seguros',          'Seguros',            5),
+      ('Rendas',           'Rendas',             6),
+      ('Contabilidade',    'Contabilidade',      7),
+      ('Outros',           'Outros',             8)
+    on conflict (id) do nothing
+  `);
+
+  await query(`grant select on expense_categories to ubuntu`).catch(() => {});
 
   // ── 2 & 3. Add FK constraints where columns already exist (added by postgres) ─
   // The columns themselves are added via postgres superuser on first deploy.
