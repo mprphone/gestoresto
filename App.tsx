@@ -46,7 +46,8 @@ import {
   Users,
   LogOut,
   ClipboardCheck,
-  Receipt
+  Receipt,
+  Settings
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -420,17 +421,17 @@ const App: React.FC = () => {
             <NavItem icon={<BookOpen />} label="Catálogo" active={activeTab === 'catalog'} onClick={() => setActiveTab('catalog')} />
             <NavItem icon={<Link2 />} label="Equivalências" active={activeTab === 'equiv'} onClick={() => setActiveTab('equiv')} />
             <NavItem icon={<BarChart3 />} label="Análises" active={activeTab === 'rep'} onClick={() => setActiveTab('rep')} />
-            {isAdmin && (
-              <>
-                <div className="border-t border-slate-800 my-3" />
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 px-5 text-center">Administração</p>
-                <NavItem icon={<Building2 />} label="Empresas & Restaurantes" active={activeTab === 'companies'} onClick={() => setActiveTab('companies')} />
-              </>
-            )}
           </nav>
         <div className="p-6 border-t border-slate-800">
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{currentUser.name}</p>
-          {isFuncionario && <p className="text-[9px] font-bold text-orange-400 uppercase tracking-widest mb-2">Funcionário</p>}
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab('companies')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all font-bold text-sm mb-1 ${activeTab === 'companies' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
+            >
+              <Settings size={16} /> Administração
+            </button>
+          )}
           <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all font-bold text-sm">
             <LogOut size={18} /> Sair
           </button>
