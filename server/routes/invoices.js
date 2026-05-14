@@ -345,14 +345,14 @@ invoicesRouter.post('/', async (req, res, next) => {
           primary_archive_document_id, has_qr_code, has_atcud, atcud,
           image_quality_ok, is_missing_pages,
           qr_code_text, qr_total_amount, calculated_lines_total, total_validation_status, total_validation_notes,
-          compliance_notes
+          compliance_notes, expense_category
         )
         values (
           $1, $2, $3, $4, $5, $6, $7, $8,
           $9, $10, coalesce($11, current_date), $12, coalesce($13::invoice_status, 'PENDENTE'::invoice_status), coalesce($14, 0), $15,
           $16, $17, $18, $19, $20, $21,
           $22, $23, $24, $25, $26,
-          $27
+          $27, $28
         )
         on conflict (supplier_nif, doc_number) do nothing
         returning *
@@ -365,7 +365,7 @@ invoicesRouter.post('/', async (req, res, next) => {
         payload.primaryArchiveDocumentId, payload.hasQrCode, payload.hasAtcud, payload.atcud,
         payload.imageQualityOk, payload.isMissingPages,
         payload.qrCodeText, payload.qrTotalAmount, payload.calculatedLinesTotal, totalValidation.status, totalValidation.notes || null,
-        payload.complianceNotes
+        payload.complianceNotes, payload.expenseCategory || null
       ]);
 
       if (!invoice.rows[0]) {

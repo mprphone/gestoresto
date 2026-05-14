@@ -24,6 +24,7 @@ const invoiceFromDb = (row: any): PurchaseInvoice => ({
   lastPaymentMethod: row.last_payment_method || undefined,
   lastPaymentAccount: row.last_payment_account || undefined,
   proofUrl: apiUrl(row.proof_url || undefined),
+  expenseCategory: row.expense_category || undefined,
   digitalCompliance: {
     hasQrCode: row.has_qr_code,
     hasAtcud: row.has_atcud,

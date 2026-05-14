@@ -197,7 +197,14 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, invoiceLines, p
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    <p className="font-black text-slate-800 text-sm">{inv.supplierName}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-black text-slate-800 text-sm">{inv.supplierName}</p>
+                      {inv.expenseCategory && (
+                        <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 border border-purple-100 flex-shrink-0">
+                          {inv.expenseCategory}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{inv.docNumber}</p>
                   </td>
                   <td className="px-6 py-4">

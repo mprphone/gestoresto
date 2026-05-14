@@ -25,6 +25,7 @@ import RestaurantSettings from './components/RestaurantSettings';
 import LoginScreen from './components/LoginScreen';
 import EmployeesManagement from './components/EmployeesManagement';
 import InvoiceReview from './components/InvoiceReview';
+import Expenses from './components/Expenses';
 import { listPendingInvoices, subscribePush, getVapidPublicKey } from './data/reviewRepository';
 import {
   LayoutDashboard,
@@ -40,7 +41,8 @@ import {
   Store,
   Users,
   LogOut,
-  ClipboardCheck
+  ClipboardCheck,
+  Receipt
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -60,7 +62,7 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : null;
   });
   const isFuncionario = currentUser?.role === 'funcionario';
-  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'restaurant' | 'employees' | 'review'>(() =>
+  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'restaurant' | 'employees' | 'review' | 'expenses'>(() =>
     currentUser?.role === 'funcionario' ? 'entry' : 'dash'
   );
   const [pendingReviewCount, setPendingReviewCount] = useState(0);
@@ -383,6 +385,7 @@ const App: React.FC = () => {
             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-8 mb-2 px-5 text-center">Gestão IA</p>
             <NavItem icon={<PlusCircle />} label="Nova Fatura" active={activeTab === 'entry'} onClick={() => setActiveTab('entry')} />
             <NavItem icon={<ClipboardCheck />} label="Rever Faturas" active={activeTab === 'review'} onClick={() => setActiveTab('review')} badge={pendingReviewCount} />
+            <NavItem icon={<Receipt />} label="Despesas" active={activeTab === 'expenses'} onClick={() => setActiveTab('expenses')} />
             <NavItem icon={<Wallet />} label="Pagamentos" active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} />
             <NavItem icon={<Building2 />} label="Fornecedores" active={activeTab === 'suppliers'} onClick={() => setActiveTab('suppliers')} />
             <NavItem icon={<Store />} label="Restaurante" active={activeTab === 'restaurant'} onClick={() => setActiveTab('restaurant')} />
@@ -419,6 +422,7 @@ const App: React.FC = () => {
           {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} productAliases={productAliases} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} />}
           {activeTab === 'move' && <StockMovement products={products} movements={movements} onTransfer={handleStockMovement} categories={categories} hideStock={isFuncionario} />}
           {activeTab === 'review' && currentUser && <InvoiceReview currentUser={currentUser} onReviewed={() => setPendingReviewCount(c => Math.max(0, c - 1))} />}
+          {activeTab === 'expenses' && <Expenses onSaved={refreshData} />}
           {!isFuncionario && <>
             {activeTab === 'dash' && <Dashboard products={products} movements={movements} />}
             {activeTab === 'inv' && <InventoryList products={products} movements={movements} categories={categories} onUpdateProduct={handleUpdateProduct} />}

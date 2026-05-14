@@ -84,6 +84,8 @@ export interface PurchaseInvoice {
   lastPaymentAccount?: string;
   /** URL do comprovativo (transferência, recibo, etc.) */
   proofUrl?: string;
+  /** Categoria de despesa (Eletricidade, Água, etc.) — quando definida é uma despesa sem stock */
+  expenseCategory?: string;
 }
 
 export interface InvoiceDigitalCompliance {
