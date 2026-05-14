@@ -6,6 +6,7 @@ import {
   Camera, Upload, Check, RefreshCcw, X, Euro, QrCode, Pencil
 } from 'lucide-react';
 import { apiPost, apiPostForm } from '../data/apiClient';
+import { RestaurantProfile } from '../types';
 
 const CATEGORIES = [
   { id: 'Eletricidade',      label: 'Eletricidade',      icon: Zap,          color: 'bg-yellow-50 text-yellow-600 border-yellow-200' },
@@ -33,6 +34,7 @@ function parseATQR(text: string) {
   const docNumber = raw.includes(' ') ? raw.split(' ').slice(1).join(' ') : raw;
   return {
     supplierNif: fields['A'] || '',
+    customerNif: fields['B'] || '',
     docNumber,
     atcud: fields['H'] || '',
     totalAmount: fields['O'] ? Number(fields['O'].replace(',', '.')) : undefined,
@@ -44,9 +46,10 @@ function parseATQR(text: string) {
 
 interface ExpensesProps {
   onSaved?: () => void;
+  restaurantProfile?: RestaurantProfile | null;
 }
 
-const Expenses: React.FC<ExpensesProps> = ({ onSaved }) => {
+const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
   // Camera state
   const [isCameraOpen, setIsCameraOpen]   = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
@@ -69,9 +72,10 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved }) => {
   const [qrText,      setQrText]      = useState('');
   const [capturedImg, setCapturedImg] = useState<string | null>(null); // base64
 
-  const [isSaving,    setIsSaving]    = useState(false);
-  const [saved,       setSaved]       = useState(false);
-  const [error,       setError]       = useState<string | null>(null);
+  const [isSaving,      setIsSaving]      = useState(false);
+  const [saved,         setSaved]         = useState(false);
+  const [error,         setError]         = useState<string | null>(null);
+  const [qrNifMismatch, setQrNifMismatch] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -157,6 +161,14 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved }) => {
             if (parsed.totalAmount) setAmount(String(parsed.totalAmount));
             setDate(parsed.date);
             setQrDetected(true);
+            // NIF mismatch check
+            const restNif = String(restaurantProfile?.nif || '').replace(/\D/g, '');
+            const buyerNif = parsed.customerNif.replace(/\D/g, '');
+            if (restNif && buyerNif && buyerNif !== restNif) {
+              setQrNifMismatch(`Fatura emitida para NIF ${buyerNif}, mas o restaurante tem NIF ${restNif}. Esta fatura pode não ser dedutível.`);
+            } else {
+              setQrNifMismatch(null);
+            }
             return;
           }
         } catch {}
@@ -278,10 +290,11 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved }) => {
         </div>
       )}
 
-      {/* QR detected banner */}
+      {/* QR detected banner — red if NIF mismatch */}
       {qrDetected && (
-        <div className="absolute top-20 left-4 right-4 z-10 p-3 rounded-2xl bg-emerald-500/90 text-white text-[10px] font-black uppercase flex items-center gap-2">
-          <Check size={14} /> QR lido — enquadre a fatura completa e fotografe
+        <div className={`absolute top-20 left-4 right-4 z-10 p-3 rounded-2xl text-white text-[10px] font-black uppercase flex items-center gap-2 ${qrNifMismatch ? 'bg-red-500/95' : 'bg-emerald-500/90'}`}>
+          {qrNifMismatch ? <X size={14} /> : <Check size={14} />}
+          {qrNifMismatch ? qrNifMismatch : 'QR lido — enquadre a fatura completa e fotografe'}
         </div>
       )}
 
@@ -349,6 +362,15 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved }) => {
             {qrReady && (
               <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-100 rounded-2xl text-emerald-700 text-xs font-black">
                 <QrCode size={16} /> QR lido · dados preenchidos automaticamente
+              </div>
+            )}
+            {qrNifMismatch && (
+              <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-2xl text-red-700">
+                <X size={18} className="shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-black uppercase">⚠ NIF do Cliente Não Coincide</p>
+                  <p className="text-xs font-bold mt-1 opacity-80">{qrNifMismatch}</p>
+                </div>
               </div>
             )}
           </div>

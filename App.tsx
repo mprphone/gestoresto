@@ -422,7 +422,7 @@ const App: React.FC = () => {
           {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} productAliases={productAliases} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} />}
           {activeTab === 'move' && <StockMovement products={products} movements={movements} onTransfer={handleStockMovement} categories={categories} hideStock={isFuncionario} />}
           {activeTab === 'review' && currentUser && <InvoiceReview currentUser={currentUser} onReviewed={() => setPendingReviewCount(c => Math.max(0, c - 1))} />}
-          {activeTab === 'expenses' && <Expenses onSaved={refreshData} />}
+          {activeTab === 'expenses' && <Expenses onSaved={refreshData} restaurantProfile={restaurantProfile} />}
           {!isFuncionario && <>
             {activeTab === 'dash' && <Dashboard products={products} movements={movements} />}
             {activeTab === 'inv' && <InventoryList products={products} movements={movements} categories={categories} onUpdateProduct={handleUpdateProduct} />}
