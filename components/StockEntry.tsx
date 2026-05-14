@@ -14,7 +14,7 @@ interface StockEntryProps {
   productAliases: ProductAlias[];
   categories: Category[];
   restaurantProfile?: RestaurantProfile | null;
-  onComplete: (items: StockEntryLineInput[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any, photoUrls?: string[]) => void;
+  onComplete: (items: StockEntryLineInput[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any, photoUrls?: string[]) => void | Promise<void>;
   onQuickCreateProduct: (data: any) => Product | Promise<Product>;
 }
 
@@ -46,6 +46,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [qrPayloads, setQrPayloads] = useState<string[]>([]);
   const [qrData, setQrData] = useState<PortugueseQrData | null>(null);
   const [pageQualities, setPageQualities] = useState<PageQuality[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [cameraViewportHeight, setCameraViewportHeight] = useState(720);
   const [pendingCapture, setPendingCapture] = useState<{
     rawDataUrl: string;
@@ -58,6 +59,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const videoRef = useRef<HTMLVideoElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const captureCameraPageRef = useRef<() => Promise<void>>();
+  const autoSubmitRef = useRef(false);
 
   useEffect(() => {
     if (nif && docNumber) {
@@ -487,57 +489,63 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   };
 
   const confirmEntry = async () => {
-    if (extractedData && !isDuplicate) {
+    if (isSubmitting) return;
+    if (extractedData && !isDuplicate && !nifMismatch) {
+      setIsSubmitting(true);
       const completeMapping = { ...mapping };
       const createdProducts = { ...autoCreatedProducts };
-      for (const [idx, item] of extractedData.items.entries()) {
-        if (completeMapping[idx]) continue;
-        const created = await onQuickCreateProduct({
-          name: item.name || 'Artigo sem nome',
-          category: itemFamilies[idx] || item.category || 'Outros',
-          unit: unitOriginals[idx] || item.unit || 'un',
-          minStock: 0
-        });
-        completeMapping[idx] = created.id;
-        createdProducts[created.id] = created;
-      }
-      setMapping(completeMapping);
-      setAutoCreatedProducts(createdProducts);
+      try {
+        for (const [idx, item] of extractedData.items.entries()) {
+          if (completeMapping[idx]) continue;
+          const created = await onQuickCreateProduct({
+            name: item.name || 'Artigo sem nome',
+            category: itemFamilies[idx] || item.category || 'Outros',
+            unit: unitOriginals[idx] || item.unit || 'un',
+            minStock: 0
+          });
+          completeMapping[idx] = created.id;
+          createdProducts[created.id] = created;
+        }
+        setMapping(completeMapping);
+        setAutoCreatedProducts(createdProducts);
 
-      const itemsToSubmit: StockEntryLineInput[] = extractedData.items.map((item, idx) => {
-        const product = products.find(p => p.id === completeMapping[idx]) || createdProducts[completeMapping[idx]];
-        const factor = conversionFactors[idx] || 1;
-        return {
-          ...item,
-          productId: completeMapping[idx],
-          aliasId: aliasMapping[idx],
-          officialName: product?.name || item.name,
-          supplierItemCode: item.supplierItemCode,
-          unitOriginal: unitOriginals[idx] || item.unit || product?.unit || 'un',
-          conversionFactor: factor,
-          quantityStock: item.quantity * factor,
-          unitStock: product?.unit || unitOriginals[idx] || 'un',
-          vatRate: item.vatRate,
-          confidence: matchConfidences[idx] || 55
-        };
-      });
-      const sourcePages = originalPages.length > 0 ? originalPages : pages.map(page => `data:image/jpeg;base64,${page}`);
-      const invoicePhotos = sourcePages.map(page => page.startsWith('data:') ? page : `data:image/jpeg;base64,${page}`);
-      const documentType = normalizePortugueseDocumentType(qrData?.documentType, extractedData.documentType, qrData?.documentNumber, extractedData.invoiceNumber);
-      onComplete(itemsToSubmit, invoicePhotos[0], { name: supplier, nif }, {
-        docNumber,
-        documentType,
-        dateIssued: qrData?.documentDate,
-        totalAmount: extractedData.totalInvoiceAmount,
-        customerName: extractedData.customerName,
-        customerNif: qrData?.customerNif || extractedData.customerNif,
-        qrCodeText: extractedData.qrCodeText || extractedData.digitalCompliance.qrCodeText,
-        qrTotalAmount: extractedData.qrTotalAmount ?? extractedData.digitalCompliance.qrTotalAmount,
-        calculatedLinesTotal: extractedData.calculatedLinesTotal ?? extractedData.digitalCompliance.calculatedLinesTotal,
-        totalValidationStatus: extractedData.digitalCompliance.totalValidationStatus,
-        totalValidationNotes: extractedData.digitalCompliance.totalValidationNotes,
-        digitalCompliance: extractedData.digitalCompliance
-      }, invoicePhotos);
+        const itemsToSubmit: StockEntryLineInput[] = extractedData.items.map((item, idx) => {
+          const product = products.find(p => p.id === completeMapping[idx]) || createdProducts[completeMapping[idx]];
+          const factor = conversionFactors[idx] || 1;
+          return {
+            ...item,
+            productId: completeMapping[idx],
+            aliasId: aliasMapping[idx],
+            officialName: product?.name || item.name,
+            supplierItemCode: item.supplierItemCode,
+            unitOriginal: unitOriginals[idx] || item.unit || product?.unit || 'un',
+            conversionFactor: factor,
+            quantityStock: item.quantity * factor,
+            unitStock: product?.unit || unitOriginals[idx] || 'un',
+            vatRate: item.vatRate,
+            confidence: matchConfidences[idx] || 55
+          };
+        });
+        const sourcePages = originalPages.length > 0 ? originalPages : pages.map(page => `data:image/jpeg;base64,${page}`);
+        const invoicePhotos = sourcePages.map(page => page.startsWith('data:') ? page : `data:image/jpeg;base64,${page}`);
+        const documentType = normalizePortugueseDocumentType(qrData?.documentType, extractedData.documentType, qrData?.documentNumber, extractedData.invoiceNumber);
+        await Promise.resolve(onComplete(itemsToSubmit, invoicePhotos[0], { name: supplier, nif }, {
+          docNumber,
+          documentType,
+          dateIssued: qrData?.documentDate,
+          totalAmount: extractedData.totalInvoiceAmount,
+          customerName: extractedData.customerName,
+          customerNif: qrData?.customerNif || extractedData.customerNif,
+          qrCodeText: extractedData.qrCodeText || extractedData.digitalCompliance.qrCodeText,
+          qrTotalAmount: extractedData.qrTotalAmount ?? extractedData.digitalCompliance.qrTotalAmount,
+          calculatedLinesTotal: extractedData.calculatedLinesTotal ?? extractedData.digitalCompliance.calculatedLinesTotal,
+          totalValidationStatus: extractedData.digitalCompliance.totalValidationStatus,
+          totalValidationNotes: extractedData.digitalCompliance.totalValidationNotes,
+          digitalCompliance: extractedData.digitalCompliance
+        }, invoicePhotos));
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -730,6 +738,32 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     ? normalizePortugueseDocumentType(qrData?.documentType, extractedData.documentType, qrData?.documentNumber, extractedData.invoiceNumber)
     : normalizePortugueseDocumentType(qrData?.documentType, qrData?.documentNumber);
   const isCreditDocument = currentDocumentType === 'NC';
+  const allItemsGreen = extractedData
+    ? extractedData.items.every((item, idx) => Boolean(mapping[idx]) && (matchConfidences[idx] || 0) >= 90)
+    : false;
+  const creditStockIsEnough = !extractedData || !isCreditDocument || extractedData.items.every((item, idx) => {
+    const product = products.find(p => p.id === mapping[idx]) || autoCreatedProducts[mapping[idx]];
+    const quantity = item.quantity * (conversionFactors[idx] || 1);
+    return Number(product?.currentStock || 0) >= quantity;
+  });
+  const autoAcceptReady = Boolean(
+    extractedData &&
+    qrData &&
+    !isProcessing &&
+    !isSubmitting &&
+    !isDuplicate &&
+    !nifMismatch &&
+    extractedData.digitalCompliance?.totalValidationStatus === 'VALIDO' &&
+    (extractedData.digitalCompliance?.confidenceScore || 0) >= 90 &&
+    allItemsGreen &&
+    creditStockIsEnough
+  );
+
+  useEffect(() => {
+    if (!autoAcceptReady || autoSubmitRef.current) return;
+    autoSubmitRef.current = true;
+    confirmEntry();
+  }, [autoAcceptReady]);
 
   return (
     <div className="max-w-6xl mx-auto space-y-4 sm:space-y-6 pb-28 sm:pb-20">
@@ -969,7 +1003,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                     </div>
                     <div className="sticky bottom-0 z-30 -mx-4 -mb-4 sm:mx-0 sm:mb-0 p-4 sm:p-0 bg-white/95 sm:bg-transparent backdrop-blur border-t sm:border-t pt-4 sm:pt-8 flex flex-col md:flex-row justify-between items-center gap-3 sm:gap-6">
                        <div className="hidden sm:block"><p className="text-[10px] font-black text-slate-400 uppercase">Total do Documento</p><p className="text-4xl font-black italic text-slate-900">€ {extractedData.totalInvoiceAmount.toFixed(2)}</p></div>
-                       <button onClick={confirmEntry} className={`w-full md:w-auto px-8 sm:px-12 py-4 sm:py-5 rounded-2xl sm:rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate || nifMismatch ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : isCreditDocument ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-orange-500 text-white hover:bg-orange-600 sm:bg-slate-900 sm:hover:bg-orange-500'}`} disabled={!!(isDuplicate || nifMismatch)}>{isCreditDocument ? 'Confirmar Nota de Crédito' : 'Confirmar Entrada'} <Check size={20} className="inline ml-2" /></button>
+                       <button onClick={confirmEntry} className={`w-full md:w-auto px-8 sm:px-12 py-4 sm:py-5 rounded-2xl sm:rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate || nifMismatch || isSubmitting ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : isCreditDocument ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-orange-500 text-white hover:bg-orange-600 sm:bg-slate-900 sm:hover:bg-orange-500'}`} disabled={!!(isDuplicate || nifMismatch || isSubmitting)}>
+                         {isSubmitting ? 'A guardar automaticamente...' : isCreditDocument ? 'Confirmar Nota de Crédito' : 'Confirmar Entrada'} {isSubmitting ? <RefreshCcw size={18} className="inline ml-2 animate-spin" /> : <Check size={20} className="inline ml-2" />}
+                       </button>
                     </div>
                  </div>
                </div>
