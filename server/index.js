@@ -17,6 +17,9 @@ import { restaurantProfileRouter } from './routes/restaurantProfile.js';
 import { geminiRouter } from './routes/gemini.js';
 import { pushRouter } from './routes/push.js';
 import { reviewRouter } from './routes/review.js';
+import { companiesRouter } from './routes/companies.js';
+import { restaurantsRouter } from './routes/restaurants.js';
+import { runMigrations } from './migrate.js';
 
 const app = express();
 
@@ -75,6 +78,8 @@ app.use('/api/restaurant-profile', restaurantProfileRouter);
 app.use('/api/gemini', geminiRouter);
 app.use('/api/push', pushRouter);
 app.use('/api/review', reviewRouter);
+app.use('/api/companies', companiesRouter);
+app.use('/api/restaurants', restaurantsRouter);
 
 app.use((error, _req, res, _next) => {
   console.error(error);
@@ -88,6 +93,10 @@ server.ref();
 
 ensureDefaultAdminUser().catch(error => {
   console.error('Failed to ensure default admin user', error);
+});
+
+runMigrations().catch(error => {
+  console.error('Migration error:', error.message);
 });
 
 pool.query(`

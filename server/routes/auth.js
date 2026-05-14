@@ -52,7 +52,7 @@ authRouter.post('/login', async (req, res, next) => {
   try {
     const { email, password } = req.body;
     const result = await query(`
-      select id, name, email, phone, role, password_hash
+      select id, name, email, phone, role, password_hash, last_restaurant_id, last_company_id
       from app_users
       where lower(email) = lower($1) and is_active = true
     `, [email]);
@@ -61,7 +61,27 @@ authRouter.post('/login', async (req, res, next) => {
       res.status(401).json({ error: 'invalid credentials' });
       return;
     }
-    res.json({ id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role });
+
+    // Load accessible restaurants for this user
+    const restaurantsRes = await query(`
+      select r.id, r.name, r.nif, r.company_id, c.name as company_name,
+             r.notification_emails, ura.role as user_role
+      from user_restaurant_access ura
+      join restaurants r on r.id = ura.restaurant_id
+      join companies c on c.id = r.company_id
+      where ura.user_id = $1 and ura.is_active = true and r.is_active = true
+      order by c.name asc, r.name asc
+    `, [user.id]);
+    const restaurants = restaurantsRes.rows;
+
+    // Determine current restaurant: last used, or first available
+    let currentRestaurant = restaurants.find(r => r.id === user.last_restaurant_id) || restaurants[0] || null;
+
+    res.json({
+      id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role,
+      restaurants,
+      currentRestaurant
+    });
   } catch (error) {
     next(error);
   }
@@ -125,6 +145,33 @@ authRouter.post('/users', async (req, res, next) => {
     }
 
     res.status(201).json(result.rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/auth/switch-restaurant — change active restaurant, persist preference
+authRouter.post('/switch-restaurant', async (req, res, next) => {
+  try {
+    const { userId, restaurantId } = req.body;
+    if (!userId || !restaurantId) return res.status(400).json({ error: 'userId and restaurantId are required' });
+
+    const access = await query(`
+      select ura.company_id, r.id, r.name, r.nif, c.name as company_name,
+             r.notification_emails, ura.role as user_role
+      from user_restaurant_access ura
+      join restaurants r on r.id = ura.restaurant_id
+      join companies c on c.id = r.company_id
+      where ura.user_id = $1 and ura.restaurant_id = $2 and ura.is_active = true
+    `, [userId, restaurantId]);
+
+    if (!access.rows[0]) return res.status(403).json({ error: 'Sem acesso a este restaurante.' });
+
+    await query(`
+      update app_users set last_restaurant_id = $1, last_company_id = $2 where id = $3
+    `, [restaurantId, access.rows[0].company_id, userId]);
+
+    res.json({ currentRestaurant: access.rows[0] });
   } catch (error) {
     next(error);
   }

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { ArchiveDocumentType, Category, Product, Movement, MovementType, Supplier, PurchaseInvoice, InvoiceStatus, DefaultCategories, Payment, ProductAlias, PurchaseInvoiceLine, DigitalArchiveDocument, StockEntryLineInput, RestaurantProfile, AppUser } from './types';
+import { ArchiveDocumentType, Category, Product, Movement, MovementType, Supplier, PurchaseInvoice, InvoiceStatus, DefaultCategories, Payment, ProductAlias, PurchaseInvoiceLine, DigitalArchiveDocument, StockEntryLineInput, RestaurantProfile, AppUser, Restaurant } from './types';
 import { listProductsPage, upsertProduct, deleteProduct } from './data/productsRepository';
 import { listSuppliersPage } from './data/suppliersRepository';
 import { listInvoicesPage, listInvoiceLines, createInvoiceWithLines } from './data/invoicesRepository';
@@ -26,7 +26,11 @@ import LoginScreen from './components/LoginScreen';
 import EmployeesManagement from './components/EmployeesManagement';
 import InvoiceReview from './components/InvoiceReview';
 import Expenses from './components/Expenses';
+import CompanyAdmin from './components/CompanyAdmin';
+import RestaurantSwitcher from './components/RestaurantSwitcher';
 import { listPendingInvoices, subscribePush, getVapidPublicKey } from './data/reviewRepository';
+import { listRestaurants, switchRestaurant } from './data/companiesRepository';
+import { setAuthRestaurant } from './data/apiClient';
 import {
   LayoutDashboard,
   Package,
@@ -62,7 +66,9 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : null;
   });
   const isFuncionario = currentUser?.role === 'funcionario';
-  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'restaurant' | 'employees' | 'review' | 'expenses'>(() =>
+  const [currentRestaurant, setCurrentRestaurant] = useState<Restaurant | null>(null);
+  const [userRestaurants, setUserRestaurants] = useState<Restaurant[]>([]);
+  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'restaurant' | 'employees' | 'review' | 'expenses' | 'companies'>(() =>
     currentUser?.role === 'funcionario' ? 'entry' : 'dash'
   );
   const [pendingReviewCount, setPendingReviewCount] = useState(0);
@@ -156,14 +162,33 @@ const App: React.FC = () => {
   }, [currentUser?.id]);
 
   const handleLogin = async (email: string, password: string) => {
-    const user = await login(email, password);
+    const result = await login(email, password) as any;
+    const user = { id: result.id, name: result.name, email: result.email, phone: result.phone, role: result.role };
     setCurrentUser(user);
     localStorage.setItem('gestoresto_user', JSON.stringify(user));
+    // Set restaurant context
+    const restaurants: Restaurant[] = result.restaurants || [];
+    const current: Restaurant | null = result.currentRestaurant || restaurants[0] || null;
+    setUserRestaurants(restaurants);
+    setCurrentRestaurant(current);
+    if (current) setAuthRestaurant(current.id);
+  };
+
+  const handleSwitchRestaurant = async (restaurant: Restaurant) => {
+    if (!currentUser) return;
+    try {
+      await switchRestaurant(currentUser.id, restaurant.id);
+      setCurrentRestaurant(restaurant);
+      setAuthRestaurant(restaurant.id);
+      refreshData();
+    } catch { /* ignore */ }
   };
 
   const handleLogout = () => {
     localStorage.removeItem('gestoresto_user');
     setCurrentUser(null);
+    setCurrentRestaurant(null);
+    setUserRestaurants([]);
     setProducts([]);
     setInvoices([]);
     setUsers([]);
@@ -390,6 +415,7 @@ const App: React.FC = () => {
             <NavItem icon={<Building2 />} label="Fornecedores" active={activeTab === 'suppliers'} onClick={() => setActiveTab('suppliers')} />
             <NavItem icon={<Store />} label="Restaurante" active={activeTab === 'restaurant'} onClick={() => setActiveTab('restaurant')} />
             {currentUser.role === 'admin' && <NavItem icon={<Users />} label="Funcionários" active={activeTab === 'employees'} onClick={() => setActiveTab('employees')} />}
+            {currentUser.role === 'admin' && <NavItem icon={<Building2 />} label="Empresas" active={activeTab === 'companies'} onClick={() => setActiveTab('companies')} />}
             <NavItem icon={<BookOpen />} label="Catálogo" active={activeTab === 'catalog'} onClick={() => setActiveTab('catalog')} />
             <NavItem icon={<Link2 />} label="Equivalências" active={activeTab === 'equiv'} onClick={() => setActiveTab('equiv')} />
             <NavItem icon={<BarChart3 />} label="Análises" active={activeTab === 'rep'} onClick={() => setActiveTab('rep')} />
@@ -410,6 +436,13 @@ const App: React.FC = () => {
             {activeTab === 'entry' ? "Entrada IA no Stock" : activeTab.toUpperCase()}
           </h2>
           <div className="flex items-center gap-3">
+            {currentRestaurant && (
+              <RestaurantSwitcher
+                current={currentRestaurant}
+                all={userRestaurants}
+                onSwitch={handleSwitchRestaurant}
+              />
+            )}
             {isFuncionario && <span className="hidden sm:inline text-[10px] font-black text-orange-500 uppercase tracking-widest border border-orange-200 bg-orange-50 rounded-lg px-2 py-1">{currentUser.name}</span>}
             {!isFuncionario && <AlertsPanel products={products} batches={[]} invoices={invoices} restaurantProfile={restaurantProfile} />}
           </div>
@@ -429,6 +462,7 @@ const App: React.FC = () => {
             {activeTab === 'suppliers' && <SupplierManagement suppliers={suppliers} />}
             {activeTab === 'restaurant' && <RestaurantSettings profile={restaurantProfile} onSave={handleSaveRestaurantProfile} />}
             {activeTab === 'employees' && <EmployeesManagement users={users} onSave={handleSaveUser} />}
+            {activeTab === 'companies' && <CompanyAdmin />}
             {activeTab === 'finance' && <PurchasesList invoices={invoices} invoiceLines={invoiceLines} products={products} archiveDocuments={archiveDocuments} payments={payments} onMarkAsPaid={handleMarkAsPaid} />}
             {activeTab === 'catalog' && (
               <ProductCatalog

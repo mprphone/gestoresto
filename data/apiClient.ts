@@ -10,6 +10,27 @@ export function apiUrl(path?: string) {
   return `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
+// ── Auth context (set after login / restaurant switch) ──────────────────────
+const USER_KEY       = 'gestoresto_user';
+const RESTAURANT_KEY = 'gestoresto_restaurant_id';
+
+export function setAuthRestaurant(restaurantId: string) {
+  localStorage.setItem(RESTAURANT_KEY, restaurantId);
+}
+
+export function getAuthRestaurant(): string {
+  return localStorage.getItem(RESTAURANT_KEY) || '';
+}
+
+function authHeaders(): Record<string, string> {
+  const user = (() => { try { return JSON.parse(localStorage.getItem(USER_KEY) || '{}'); } catch { return {}; } })();
+  const headers: Record<string, string> = {};
+  if (user?.id)              headers['x-user-id']       = user.id;
+  if (getAuthRestaurant())   headers['x-restaurant-id'] = getAuthRestaurant();
+  return headers;
+}
+
+// ── Internal helpers ────────────────────────────────────────────────────────
 function apiNotConfiguredMessage() {
   return `API do servidor não configurada. Use ${DEFAULT_PRODUCTION_API_URL} ou defina VITE_API_URL e faça novo deploy.`;
 }
@@ -35,14 +56,16 @@ async function readError(response: Response) {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  if (shouldFailFast()) {
-    throw new Error(apiNotConfiguredMessage());
-  }
-  const response = await fetch(`${API_BASE}${path}`, init);
+  if (shouldFailFast()) throw new Error(apiNotConfiguredMessage());
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: { ...authHeaders(), ...(init?.headers as Record<string, string> || {}) }
+  });
   if (!response.ok) throw new Error(await readError(response));
   return response.json() as Promise<T>;
 }
 
+// ── Public API ───────────────────────────────────────────────────────────────
 export async function apiGet<T>(path: string): Promise<T> {
   return request<T>(path);
 }
@@ -60,8 +83,5 @@ export async function apiDelete<T>(path: string): Promise<T> {
 }
 
 export async function apiPostForm<T>(path: string, formData: FormData): Promise<T> {
-  return request<T>(path, {
-    method: 'POST',
-    body: formData
-  });
+  return request<T>(path, { method: 'POST', body: formData });
 }

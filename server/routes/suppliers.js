@@ -11,13 +11,18 @@ function normalizeNif(value) {
 suppliersRouter.get('/', async (req, res, next) => {
   try {
     const { page, pageSize, limit, offset } = pageRange(req);
+    const restaurantId = req.headers['x-restaurant-id'] || null;
+    const filter = restaurantId ? 'where (restaurant_id = $3 or restaurant_id is null)' : '';
+    const params = restaurantId ? [limit, offset, restaurantId] : [limit, offset];
     const result = await query(`
       select id, name, nif, email, phone, payment_terms_days, notes
-      from suppliers
+      from suppliers ${filter}
       order by name asc
       limit $1 offset $2
-    `, [limit, offset]);
-    const count = await query('select count(*) from suppliers');
+    `, params);
+    const cParams = restaurantId ? [restaurantId] : [];
+    const cFilter = restaurantId ? 'where (restaurant_id = $1 or restaurant_id is null)' : '';
+    const count = await query(`select count(*) from suppliers ${cFilter}`, cParams);
     res.json(pageResult(result.rows, count.rows[0].count, page, pageSize));
   } catch (error) {
     next(error);
