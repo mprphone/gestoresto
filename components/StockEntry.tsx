@@ -785,15 +785,24 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const allItemsGreen = extractedData
     ? extractedData.items.every((item, idx) => Boolean(mapping[idx]) && (matchConfidences[idx] || 0) >= 90)
     : false;
-  const autoAcceptReady = Boolean(
+  const fiscalQrReady = Boolean(
     extractedData &&
     qrData &&
+    (qrData.totalAmount || extractedData.qrTotalAmount) &&
+    !extractedData.digitalCompliance?.isMissingPages
+  );
+  const validationAcceptableForAuto = Boolean(
+    extractedData?.digitalCompliance?.totalValidationStatus === 'VALIDO' ||
+    (fiscalQrReady && (extractedData?.digitalCompliance?.confidenceScore || 0) >= 70)
+  );
+  const autoAcceptReady = Boolean(
+    extractedData &&
+    fiscalQrReady &&
     !isProcessing &&
     !isSubmitting &&
     !isDuplicate &&
     !nifMismatch &&
-    extractedData.digitalCompliance?.totalValidationStatus === 'VALIDO' &&
-    (extractedData.digitalCompliance?.confidenceScore || 0) >= 90 &&
+    validationAcceptableForAuto &&
     allItemsGreen
   );
 
