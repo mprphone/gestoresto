@@ -1,4 +1,4 @@
-import { AppUser } from '../types';
+import { AppUser, Restaurant } from '../types';
 import { apiGet, apiPost } from './apiClient';
 
 const fromDb = (row: any): AppUser => ({
@@ -10,9 +10,26 @@ const fromDb = (row: any): AppUser => ({
   isActive: row.is_active !== false
 });
 
-export async function login(email: string, password: string): Promise<AppUser> {
+const fromRestaurant = (row: any): Restaurant => ({
+  id: row.id, companyId: row.company_id, companyName: row.company_name || undefined,
+  name: row.name, nif: row.nif || undefined,
+  notificationEmails: row.notification_emails || [],
+  isActive: row.is_active, userRole: row.user_role || undefined
+});
+
+export interface LoginResult {
+  user: AppUser;
+  restaurants: Restaurant[];
+  currentRestaurant: Restaurant | null;
+}
+
+export async function login(email: string, password: string): Promise<LoginResult> {
   const row = await apiPost<any>('/api/auth/login', { email, password });
-  return fromDb({ ...row, is_active: true });
+  return {
+    user: fromDb({ ...row, is_active: true }),
+    restaurants: (row.restaurants || []).map(fromRestaurant),
+    currentRestaurant: row.currentRestaurant ? fromRestaurant(row.currentRestaurant) : null
+  };
 }
 
 export async function listUsers(): Promise<AppUser[]> {

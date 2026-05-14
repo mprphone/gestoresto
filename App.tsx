@@ -29,8 +29,8 @@ import Expenses from './components/Expenses';
 import CompanyAdmin from './components/CompanyAdmin';
 import RestaurantSwitcher from './components/RestaurantSwitcher';
 import { listPendingInvoices, subscribePush, getVapidPublicKey } from './data/reviewRepository';
-import { listRestaurants, switchRestaurant } from './data/companiesRepository';
-import { setAuthRestaurant } from './data/apiClient';
+import { listRestaurants as fetchUserRestaurants, switchRestaurant } from './data/companiesRepository';
+import { setAuthRestaurant, getAuthRestaurant } from './data/apiClient';
 import {
   LayoutDashboard,
   Package,
@@ -114,6 +114,20 @@ const App: React.FC = () => {
     setArchiveDocuments(archiveGroups.flatMap(group => group.data));
   };
 
+  // On startup: if already logged in via localStorage, load restaurant context
+  useEffect(() => {
+    if (!currentUser || currentRestaurant) return;
+    fetchUserRestaurants(currentUser.id)
+      .then(list => {
+        setUserRestaurants(list);
+        const savedId = getAuthRestaurant();
+        const current = list.find(r => r.id === savedId) || list[0] || null;
+        setCurrentRestaurant(current);
+        if (current) setAuthRestaurant(current.id);
+      })
+      .catch(() => {});
+  }, [currentUser?.id]);
+
   useEffect(() => {
     if (!currentUser) { setIsLoading(false); return; }
     setIsLoading(true);
@@ -162,14 +176,11 @@ const App: React.FC = () => {
   }, [currentUser?.id]);
 
   const handleLogin = async (email: string, password: string) => {
-    const result = await login(email, password) as any;
-    const user = { id: result.id, name: result.name, email: result.email, phone: result.phone, role: result.role };
+    const { user, restaurants, currentRestaurant } = await login(email, password);
     setCurrentUser(user);
     localStorage.setItem('gestoresto_user', JSON.stringify(user));
-    // Set restaurant context
-    const restaurants: Restaurant[] = result.restaurants || [];
-    const current: Restaurant | null = result.currentRestaurant || restaurants[0] || null;
     setUserRestaurants(restaurants);
+    const current = currentRestaurant || restaurants[0] || null;
     setCurrentRestaurant(current);
     if (current) setAuthRestaurant(current.id);
   };
