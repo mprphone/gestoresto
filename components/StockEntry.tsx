@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Camera, Upload, Check, X, PlusCircle, RefreshCcw, Copy } from 'lucide-react';
 import { processInvoiceImage, InvoiceExtractedData } from '../geminiService';
 import { Product, Category, Supplier, PurchaseInvoice, ProductAlias, StockEntryLineInput, RestaurantProfile } from '../types';
-import { normalizeInvoiceImage, normalizeWithoutCrop, detectDocumentCrop, CropProposal, PageQuality, PortugueseQrData, normalizePortugueseDocumentType, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads, validateInvoiceTotals } from './stock-entry/invoiceProcessor';
+import { normalizeWithoutCrop, PageQuality, PortugueseQrData, normalizePortugueseDocumentType, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads, validateInvoiceTotals } from './stock-entry/invoiceProcessor';
 import { buildProductMatches, confidenceStyle, normalizeNif } from './stock-entry/productMatcher';
 
 interface StockEntryProps {
@@ -48,12 +48,6 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [pageQualities, setPageQualities] = useState<PageQuality[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [cameraViewportHeight, setCameraViewportHeight] = useState(720);
-  const [pendingCapture, setPendingCapture] = useState<{
-    rawDataUrl: string;
-    croppedBase64: string;
-    croppedQuality: PageQuality;
-    proposal: CropProposal;
-  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -387,7 +381,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         });
         reader.readAsDataURL(files[i]);
         const originalDataUrl = await p;
-        const normalized = await normalizeInvoiceImage(originalDataUrl);
+        const normalized = await normalizeWithoutCrop(originalDataUrl);
         newOriginalPages.push(originalDataUrl);
         newPages.push(normalized.data);
         newQualities.push(normalized.quality);
@@ -440,23 +434,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
     const rawDataUrl = canvas.toDataURL('image/jpeg', 0.92);
 
-    // Crop detection — only for single-page captures (not multi-mode)
-    const proposal = detectDocumentCrop(canvas);
-    if (!cameraIsMultiMode && proposal.confidence >= 0.7) {
-      const normalized = await normalizeInvoiceImage(rawDataUrl);
-      closeCamera();
-      setPendingCapture({ rawDataUrl, croppedBase64: normalized.data, croppedQuality: normalized.quality, proposal });
-      return;
-    }
-
-    // Low confidence or multi-mode: use original (no crop) for single-page, auto-crop for multi
-    let normalized: { data: string; quality: PageQuality; width: number; height: number };
-    if (!cameraIsMultiMode && proposal.confidence < 0.3) {
-      normalized = await normalizeWithoutCrop(rawDataUrl);
-      setProcessingError('Não foi possível detetar o documento com segurança. A imagem original foi mantida.');
-    } else {
-      normalized = await normalizeInvoiceImage(rawDataUrl);
-    }
+    const normalized = await normalizeWithoutCrop(rawDataUrl);
 
     const updated = [...pages, normalized.data];
     const updatedOriginals = [...originalPages, rawDataUrl];
@@ -494,36 +472,6 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       closeCamera();
       await processAllPages(updatedOriginals, updatedQrPayloads);
     }
-  };
-
-  const confirmCapture = async (useCrop: boolean) => {
-    if (!pendingCapture) return;
-    const { rawDataUrl, croppedBase64, croppedQuality, proposal } = pendingCapture;
-    setPendingCapture(null);
-
-    let normalized: { data: string; quality: PageQuality; width: number; height: number };
-    if (useCrop) {
-      normalized = { data: croppedBase64, quality: croppedQuality, width: proposal.cropW, height: proposal.cropH };
-    } else {
-      normalized = await normalizeWithoutCrop(rawDataUrl);
-    }
-
-    const updated = [...pages, normalized.data];
-    const updatedOriginals = [...originalPages, rawDataUrl];
-    const newQrPayloads = await scanQrPayloads([normalized.data]);
-    const updatedQrPayloads = [...qrPayloads, ...newQrPayloads];
-    setPages(updated);
-    setOriginalPages(updatedOriginals);
-    setQrPayloads(updatedQrPayloads);
-    setPageQualities((prev: PageQuality[]) => [...prev, { ...normalized.quality, hasQrCode: Boolean(newQrPayloads[0]) }]);
-
-    if (updatedQrPayloads.length > 0) {
-      const parsedQr = applyQrData(updatedQrPayloads[0]);
-      const nifErr = checkQrBuyerNif(parsedQr);
-      if (nifErr) { setNifMismatch(nifErr); return; }
-    }
-    setNifMismatch(null);
-    await processAllPages(updatedOriginals, updatedQrPayloads);
   };
 
   const analyzeCameraParts = async () => {
@@ -726,55 +674,6 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         </button>
       </div>
     </div>
-  ) : null;
-
-  const cropConfirmModal = pendingCapture && !isCameraOpen ? createPortal(
-    <div className="fixed inset-0 z-[2147483646] bg-black/80 flex items-end sm:items-center justify-center">
-      <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] w-full sm:max-w-md p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-black uppercase text-sm">Recorte Detetado</h3>
-          <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase ${pendingCapture.proposal.confidence >= 0.8 ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>
-            {Math.round(pendingCapture.proposal.confidence * 100)}% conf.
-          </span>
-        </div>
-        <p className="text-[10px] text-slate-500 font-medium mb-4">O documento foi detetado automaticamente. O recorte remove o fundo e facilita a leitura.</p>
-        <div className="grid grid-cols-2 gap-3 mb-5">
-          <div className="space-y-1.5">
-            <p className="text-[9px] font-black text-slate-400 uppercase text-center">Original</p>
-            <div className="h-36 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 flex items-center justify-center">
-              <img src={pendingCapture.rawDataUrl} className="max-w-full max-h-full object-contain" />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <p className="text-[9px] font-black text-emerald-600 uppercase text-center">✓ Recortado</p>
-            <div className="h-36 rounded-xl overflow-hidden border-2 border-emerald-400 bg-slate-100 flex items-center justify-center">
-              <img src={`data:image/jpeg;base64,${pendingCapture.croppedBase64}`} className="max-w-full max-h-full object-contain" />
-            </div>
-          </div>
-        </div>
-        <div className="flex flex-col gap-2">
-          <button
-            onClick={() => confirmCapture(true)}
-            className="w-full py-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-white font-black uppercase text-xs transition-all flex items-center justify-center gap-2"
-          >
-            <Check size={15} /> Usar Recorte <span className="text-emerald-200 text-[9px] normal-case font-bold">(recomendado)</span>
-          </button>
-          <button
-            onClick={() => confirmCapture(false)}
-            className="w-full py-3 rounded-2xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-black uppercase text-xs transition-all"
-          >
-            Usar Imagem Original
-          </button>
-          <button
-            onClick={() => setPendingCapture(null)}
-            className="w-full py-2 text-slate-400 hover:text-slate-600 font-black uppercase text-[10px] transition-colors"
-          >
-            Cancelar — Tirar Outra Foto
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
   ) : null;
 
   const matchedItemsCount = extractedData ? extractedData.items.filter((_, idx) => mapping[idx]).length : 0;
@@ -1091,7 +990,6 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       )}
 
       {cameraOverlay && createPortal(cameraOverlay, document.body)}
-      {cropConfirmModal}
     </div>
   );
 };
