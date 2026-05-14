@@ -398,6 +398,17 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setQrPayloads(updatedQrPayloads);
     setPageQualities(prev => [...prev, { ...normalized.quality, hasQrCode: Boolean(newQrPayloads[0]) }]);
 
+    // NIF check immediately after capture — before calling Gemini
+    if (newQrPayloads.length > 0) {
+      const nifErr = checkQrBuyerNif(newQrPayloads[0]);
+      if (nifErr) {
+        closeCamera();
+        setNifMismatch(nifErr);
+        return;
+      }
+    }
+    setNifMismatch(null);
+
     const isLong = normalized.width > 0 && (normalized.height / normalized.width) > 2.5;
     const newPartCount = capturedParts + 1;
 
@@ -435,6 +446,12 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setOriginalPages(updatedOriginals);
     setQrPayloads(updatedQrPayloads);
     setPageQualities((prev: PageQuality[]) => [...prev, { ...normalized.quality, hasQrCode: Boolean(newQrPayloads[0]) }]);
+
+    if (newQrPayloads.length > 0) {
+      const nifErr = checkQrBuyerNif(newQrPayloads[0]);
+      if (nifErr) { setNifMismatch(nifErr); return; }
+    }
+    setNifMismatch(null);
     await processAllPages(updatedOriginals, updatedQrPayloads);
   };
 
@@ -686,6 +703,23 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
              <button onClick={() => fileInputRef.current?.click()} className="bg-white text-slate-900 p-8 rounded-[2.5rem] font-black uppercase flex flex-col items-center gap-4 border-2 border-slate-100 hover:border-orange-500 transition-all shadow-xl active:scale-95"><Upload size={32} /> Abrir Ficheiro</button>
           </div>
           {cameraError && <p className="mt-6 text-xs font-bold text-red-500">{cameraError}</p>}
+        </div>
+      )}
+
+      {/* NIF block — shown immediately after capture, before Gemini runs */}
+      {nifMismatch && !extractedData && !isProcessing && pages.length > 0 && (
+        <div className="flex items-start gap-4 p-6 bg-red-50 border-2 border-red-300 rounded-[2rem] animate-in fade-in">
+          <span className="text-2xl shrink-0 mt-0.5">⚠️</span>
+          <div className="flex-1">
+            <p className="font-black text-red-700 text-sm uppercase tracking-wide mb-1">Fatura não pode ser registada</p>
+            <p className="text-sm font-bold text-red-600">{nifMismatch}</p>
+            <button
+              onClick={() => { setPages([]); setOriginalPages([]); setQrPayloads([]); setPageQualities([]); setNifMismatch(null); setProcessingError(null); }}
+              className="mt-4 px-5 py-2.5 bg-red-600 text-white rounded-xl text-xs font-black hover:bg-red-700 transition-colors"
+            >
+              Descartar — Tirar Nova Foto
+            </button>
+          </div>
         </div>
       )}
 
