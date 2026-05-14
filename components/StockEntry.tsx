@@ -13,11 +13,12 @@ interface StockEntryProps {
   invoices: PurchaseInvoice[];
   productAliases: ProductAlias[];
   categories: Category[];
+  restaurantProfile?: RestaurantProfile | null;
   onComplete: (items: StockEntryLineInput[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any, photoUrls?: string[]) => void;
   onQuickCreateProduct: (data: any) => Product | Promise<Product>;
 }
 
-const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, productAliases, categories, onComplete, onQuickCreateProduct }) => {
+const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, productAliases, categories, restaurantProfile, onComplete, onQuickCreateProduct }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [pages, setPages] = useState<string[]>([]);
   const [originalPages, setOriginalPages] = useState<string[]>([]);
@@ -40,6 +41,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [qrLiveDetected, setQrLiveDetected] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [processingError, setProcessingError] = useState<string | null>(null);
+  const [nifMismatch, setNifMismatch] = useState<string | null>(null);
   const [qrPayloads, setQrPayloads] = useState<string[]>([]);
   const [pageQualities, setPageQualities] = useState<PageQuality[]>([]);
   const [cameraViewportHeight, setCameraViewportHeight] = useState(720);
@@ -229,6 +231,24 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       }
       if (warnings.length > 0) {
         setProcessingError(warnings.join(' '));
+      }
+
+      // Check buyer NIF (field B in QR) against restaurant NIF
+      const qrBuyerNif = (() => {
+        for (const payload of currentQrPayloads) {
+          if (!payload) continue;
+          const fields: Record<string, string> = {};
+          payload.split('*').forEach(p => { const i = p.indexOf(':'); if (i > 0) fields[p.slice(0, i)] = p.slice(i + 1); });
+          const b = (fields['B'] || '').replace(/\D/g, '');
+          if (b && b !== '999999990') return b; // 999999990 = consumidor final
+        }
+        return null;
+      })();
+      const restaurantNif = (restaurantProfile?.nif || '').replace(/\D/g, '');
+      if (qrBuyerNif && restaurantNif && qrBuyerNif !== restaurantNif) {
+        setNifMismatch(`NIF do comprador no QR (${qrBuyerNif}) não coincide com o NIF do restaurante (${restaurantNif}). Confirme se é a fatura correta.`);
+      } else {
+        setNifMismatch(null);
       }
 
       setExtractedData(validation.data);
@@ -692,6 +712,12 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                         </div>
                       </div>
                     </div>
+                    {nifMismatch && (
+                      <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-2xl">
+                        <span className="text-red-500 text-lg leading-none shrink-0">⚠</span>
+                        <p className="text-xs font-bold text-red-700">{nifMismatch}</p>
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6">
                        <div className="space-y-1"><label className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Fornecedor</label><input type="text" className="w-full px-4 sm:px-5 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs" value={supplier} onChange={(e) => setSupplier(e.target.value)} /></div>
                        <div className="space-y-1"><label className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">NIF</label><input type="text" className="w-full px-4 sm:px-5 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs" value={nif} onChange={(e) => setNif(e.target.value)} /></div>

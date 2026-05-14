@@ -478,7 +478,7 @@ const App: React.FC = () => {
           {!isLoading && !loadError && <>
           {activeTab === 'dash' && <Dashboard products={products} movements={movements} />}
           {activeTab === 'inv' && <InventoryList products={products} movements={movements} categories={categories} onUpdateProduct={handleUpdateProduct} />}
-          {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} productAliases={productAliases} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} />}
+          {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} productAliases={productAliases} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} restaurantProfile={restaurantProfile} />}
           {activeTab === 'move' && <StockMovement products={products} movements={movements} onTransfer={handleStockMovement} categories={categories} hideStock={isFuncionario} />}
           {activeTab === 'review' && currentUser && <InvoiceReview currentUser={currentUser} onReviewed={() => setPendingReviewCount(c => Math.max(0, c - 1))} />}
           {activeTab === 'expenses' && <Expenses onSaved={refreshData} restaurantProfile={restaurantProfile} />}
