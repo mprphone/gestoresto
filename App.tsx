@@ -176,12 +176,22 @@ const App: React.FC = () => {
 
   // Poll pending review count for badge (admins only, every 60s)
   useEffect(() => {
-    if (!currentUser || isFuncionario) return;
-    const refresh = () => listPendingInvoices().then(list => setPendingReviewCount(list.length)).catch(() => {});
+    if (!currentUser || isFuncionario || !currentRestaurant) {
+      setPendingReviewCount(0);
+      return;
+    }
+    let cancelled = false;
+    setPendingReviewCount(0);
+    const refresh = () => listPendingInvoices()
+      .then(list => { if (!cancelled) setPendingReviewCount(list.length); })
+      .catch(() => { if (!cancelled) setPendingReviewCount(0); });
     refresh();
     const interval = setInterval(refresh, 60_000);
-    return () => clearInterval(interval);
-  }, [currentUser?.id]);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [currentUser?.id, isFuncionario, currentRestaurant?.id]);
 
   const handleLogin = async (email: string, password: string) => {
     const { user, restaurants, currentRestaurant: savedRestaurant } = await login(email, password);
@@ -543,7 +553,14 @@ const App: React.FC = () => {
           {activeTab === 'inv' && <InventoryList products={products} movements={movements} categories={categories} onUpdateProduct={handleUpdateProduct} />}
           {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} productAliases={productAliases} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} restaurantProfile={restaurantProfile} />}
           {activeTab === 'move' && <StockMovement products={products} movements={movements} onTransfer={handleStockMovement} categories={categories} hideStock={isFuncionario} />}
-          {activeTab === 'review' && currentUser && <InvoiceReview currentUser={currentUser} onReviewed={() => setPendingReviewCount(c => Math.max(0, c - 1))} />}
+          {activeTab === 'review' && currentUser && currentRestaurant && (
+            <InvoiceReview
+              key={currentRestaurant.id}
+              currentUser={currentUser}
+              restaurantId={currentRestaurant.id}
+              onReviewed={() => setPendingReviewCount(c => Math.max(0, c - 1))}
+            />
+          )}
           {activeTab === 'expenses' && <Expenses onSaved={refreshData} restaurantProfile={restaurantProfile} />}
           {activeTab === 'finance' && <PurchasesList invoices={invoices} invoiceLines={invoiceLines} products={products} archiveDocuments={archiveDocuments} payments={payments} onMarkAsPaid={handleMarkAsPaid} />}
           {activeTab === 'suppliers' && <SupplierManagement suppliers={suppliers} />}

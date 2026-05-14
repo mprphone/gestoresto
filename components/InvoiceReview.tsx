@@ -7,10 +7,11 @@ import { AppUser } from '../types';
 
 interface InvoiceReviewProps {
   currentUser: AppUser;
+  restaurantId?: string;
   onReviewed?: () => void;
 }
 
-const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, onReviewed }) => {
+const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId, onReviewed }) => {
   const [invoices, setInvoices] = useState<PendingInvoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [marking, setMarking] = useState<Record<string, boolean>>({});
@@ -29,7 +30,10 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, onReviewed }
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    setExpandedId(null);
+    load();
+  }, [restaurantId]);
 
   const handleMark = async (invoice: PendingInvoice) => {
     setMarking(prev => ({ ...prev, [invoice.id]: true }));
