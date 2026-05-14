@@ -33,16 +33,28 @@ suppliersRouter.post('/', async (req, res, next) => {
       res.status(400).json({ error: 'name and nif are required' });
       return;
     }
+    const existing = await query(`
+      select *
+      from suppliers
+      where restaurant_id = $1 and normalized_nif = $2
+      order by created_at asc nulls last, id asc
+      limit 1
+    `, [req.restaurantId, nif]);
+
+    if (existing.rows[0]) {
+      const result = await query(`
+        update suppliers
+        set name = $1, nif = $2, email = $3, phone = $4, payment_terms_days = coalesce($5, 30), notes = $6
+        where id = $7
+        returning *
+      `, [supplier.name, nif, supplier.email, supplier.phone, supplier.paymentTermsDays, supplier.notes, existing.rows[0].id]);
+      res.status(200).json(result.rows[0]);
+      return;
+    }
+
     const result = await query(`
       insert into suppliers (id, name, nif, email, phone, payment_terms_days, notes, restaurant_id)
       values (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, coalesce($6, 30), $7, $8)
-      on conflict (restaurant_id, normalized_nif) where normalized_nif <> '' do update set
-        name = excluded.name,
-        nif = excluded.nif,
-        email = excluded.email,
-        phone = excluded.phone,
-        payment_terms_days = excluded.payment_terms_days,
-        notes = excluded.notes
       returning *
     `, [supplier.id, supplier.name, nif, supplier.email, supplier.phone, supplier.paymentTermsDays, supplier.notes, req.restaurantId]);
     res.status(201).json(result.rows[0]);

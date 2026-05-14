@@ -341,23 +341,44 @@ invoicesRouter.post('/', async (req, res, next) => {
       let supplierId = payload.supplierId || null;
       if (!supplierId && payload.supplierNif) {
         const normalizedSupplierNif = onlyDigits(payload.supplierNif);
-        const supplier = await client.query(`
-          insert into suppliers (name, nif, email, phone, payment_terms_days, restaurant_id)
-          values ($1, $2, $3, $4, coalesce($5, 30), $6)
-          on conflict (restaurant_id, normalized_nif) where normalized_nif <> '' do update set
-            name = excluded.name,
-            nif = excluded.nif,
-            email = coalesce(excluded.email, suppliers.email),
-            phone = coalesce(excluded.phone, suppliers.phone)
-          returning *
-        `, [
-          payload.supplierName || 'Fornecedor',
-          normalizedSupplierNif,
-          payload.supplierEmail || null,
-          payload.supplierPhone || null,
-          payload.paymentTermsDays || 30,
-          req.restaurantId
-        ]);
+        const existingSupplier = await client.query(`
+          select *
+          from suppliers
+          where restaurant_id = $1 and normalized_nif = $2
+          order by created_at asc nulls last, id asc
+          limit 1
+        `, [req.restaurantId, normalizedSupplierNif]);
+
+        const supplier = existingSupplier.rows[0]
+          ? await client.query(`
+              update suppliers
+              set name = $1,
+                  nif = $2,
+                  email = coalesce($3, email),
+                  phone = coalesce($4, phone),
+                  payment_terms_days = coalesce($5, payment_terms_days)
+              where id = $6
+              returning *
+            `, [
+              payload.supplierName || existingSupplier.rows[0].name || 'Fornecedor',
+              normalizedSupplierNif,
+              payload.supplierEmail || null,
+              payload.supplierPhone || null,
+              payload.paymentTermsDays || null,
+              existingSupplier.rows[0].id
+            ])
+          : await client.query(`
+              insert into suppliers (name, nif, email, phone, payment_terms_days, restaurant_id)
+              values ($1, $2, $3, $4, coalesce($5, 30), $6)
+              returning *
+            `, [
+              payload.supplierName || 'Fornecedor',
+              normalizedSupplierNif,
+              payload.supplierEmail || null,
+              payload.supplierPhone || null,
+              payload.paymentTermsDays || 30,
+              req.restaurantId
+            ]);
         supplierId = supplier.rows[0].id;
         await audit(client, req, 'upsert', 'suppliers', supplierId, null, supplier.rows[0]);
       }
