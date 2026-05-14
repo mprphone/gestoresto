@@ -3,6 +3,11 @@ import { query } from '../db.js';
 
 export const restaurantsRouter = Router();
 
+function normalizeEmailArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => String(item || '').trim()).filter(Boolean);
+}
+
 // GET /api/restaurants?userId=X — restaurants the user can access
 restaurantsRouter.get('/', async (req, res, next) => {
   try {
@@ -59,11 +64,12 @@ restaurantsRouter.post('/', async (req, res, next) => {
   try {
     const { companyId, name, nif, legalName, email, phone, address, postalCode, city, country, notificationEmails } = req.body;
     if (!companyId || !name) return res.status(400).json({ error: 'companyId and name are required' });
+    const emails = normalizeEmailArray(notificationEmails);
     const result = await query(`
       insert into restaurants (company_id, name, nif, legal_name, email, phone, address, postal_code, city, country, notification_emails)
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce($10, 'Portugal'), coalesce($11, '{}'))
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce($10, 'Portugal'), $11::text[])
       returning *
-    `, [companyId, name, nif || null, legalName || null, email || null, phone || null, address || null, postalCode || null, city || null, country, notificationEmails || []]);
+    `, [companyId, name, nif || null, legalName || null, email || null, phone || null, address || null, postalCode || null, city || null, country, emails]);
     res.status(201).json(result.rows[0]);
   } catch (error) {
     next(error);
@@ -74,15 +80,16 @@ restaurantsRouter.post('/', async (req, res, next) => {
 restaurantsRouter.put('/:id', async (req, res, next) => {
   try {
     const { name, nif, legalName, email, phone, address, postalCode, city, country, notificationEmails, isActive } = req.body;
+    const emails = notificationEmails === undefined ? null : normalizeEmailArray(notificationEmails);
     const result = await query(`
       update restaurants
       set name = coalesce($1, name), nif = $2, legal_name = $3, email = $4, phone = $5,
           address = $6, postal_code = $7, city = $8, country = coalesce($9, country),
-          notification_emails = coalesce($10, notification_emails),
+          notification_emails = coalesce($10::text[], notification_emails),
           is_active = coalesce($11, is_active), updated_at = now()
       where id = $12
       returning *
-    `, [name, nif || null, legalName || null, email || null, phone || null, address || null, postalCode || null, city || null, country, notificationEmails, isActive, req.params.id]);
+    `, [name, nif || null, legalName || null, email || null, phone || null, address || null, postalCode || null, city || null, country, emails, isActive, req.params.id]);
     if (!result.rows[0]) return res.status(404).json({ error: 'Restaurant not found' });
     res.json(result.rows[0]);
   } catch (error) {
