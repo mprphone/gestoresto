@@ -23,6 +23,56 @@ export const parsePortugueseQrTotal = (text: string) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 };
 
+export interface PortugueseQrData {
+  rawText: string;
+  fields: Record<string, string>;
+  supplierNif?: string;
+  customerNif?: string;
+  customerCountry?: string;
+  documentType?: string;
+  documentStatus?: string;
+  documentDate?: string;
+  documentNumber?: string;
+  atcud?: string;
+  taxPayable?: number;
+  totalAmount?: number;
+}
+
+const parseQrMoney = (value?: string) => {
+  if (!value) return undefined;
+  const parsed = Number(value.trim().replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const formatQrDate = (value?: string) => {
+  const digits = (value || '').replace(/\D/g, '');
+  if (digits.length !== 8) return undefined;
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+};
+
+export const parsePortugueseQrData = (text: string): PortugueseQrData => {
+  const fields: Record<string, string> = {};
+  text.split('*').forEach(part => {
+    const index = part.indexOf(':');
+    if (index > 0) fields[part.slice(0, index)] = part.slice(index + 1).trim();
+  });
+
+  return {
+    rawText: text,
+    fields,
+    supplierNif: (fields.A || '').replace(/\D/g, '') || undefined,
+    customerNif: (fields.B || '').replace(/\D/g, '') || undefined,
+    customerCountry: fields.C || undefined,
+    documentType: fields.D || undefined,
+    documentStatus: fields.E || undefined,
+    documentDate: formatQrDate(fields.F),
+    documentNumber: fields.G || undefined,
+    atcud: fields.H || undefined,
+    taxPayable: parseQrMoney(fields.N),
+    totalAmount: parseQrMoney(fields.O)
+  };
+};
+
 const hasVatOnLines = (items: InvoiceExtractedData['items']) =>
   items.some(item => Number(item.vatRate || 0) > 0);
 
@@ -325,10 +375,11 @@ export const validateInvoiceTotals = (data: InvoiceExtractedData, detectedQrPayl
   const calculatedLinesTotal = Number.isFinite(Number(data.calculatedLinesTotal)) ? Number(data.calculatedLinesTotal) : linesTotal;
   const detectedQrText = detectedQrPayloads.find(payload => parsePortugueseQrTotal(payload) !== undefined);
   const qrText = detectedQrText || data.qrCodeText || detectedQrPayloads[0];
+  const qrData = qrText ? parsePortugueseQrData(qrText) : undefined;
   const parsedDetectedQrTotal = detectedQrText ? parsePortugueseQrTotal(detectedQrText) : undefined;
   const parsedGeminiQrTotal = data.qrCodeText ? parsePortugueseQrTotal(data.qrCodeText) : undefined;
   const geminiQrTotal = Number(data.qrTotalAmount || 0) > 0 ? data.qrTotalAmount : undefined;
-  const qrTotal = parsedDetectedQrTotal ?? parsedGeminiQrTotal ?? geminiQrTotal;
+  const qrTotal = qrData?.totalAmount ?? parsedDetectedQrTotal ?? parsedGeminiQrTotal ?? geminiQrTotal;
   const extractedInvoiceTotal = Number(data.totalInvoiceAmount || 0) > 0 ? Number(data.totalInvoiceAmount) : undefined;
   const inferredInvoiceTotal = extractedInvoiceTotal ?? qrTotal ?? (calculatedLinesTotal > 0 ? calculatedLinesTotal : undefined);
   const invoiceTotalCents = moneyCents(inferredInvoiceTotal);
@@ -365,6 +416,9 @@ export const validateInvoiceTotals = (data: InvoiceExtractedData, detectedQrPayl
   return {
     data: {
       ...data,
+      supplierNif: qrData?.supplierNif || data.supplierNif,
+      customerNif: qrData?.customerNif || data.customerNif,
+      invoiceNumber: qrData?.documentNumber || data.invoiceNumber,
       totalInvoiceAmount: inferredInvoiceTotal ?? 0,
       qrCodeText: qrText,
       qrTotalAmount: qrTotal,
@@ -372,6 +426,8 @@ export const validateInvoiceTotals = (data: InvoiceExtractedData, detectedQrPayl
       digitalCompliance: {
         ...data.digitalCompliance,
         hasQrCode: data.digitalCompliance.hasQrCode || detectedQrPayloads.length > 0,
+        hasAtcud: data.digitalCompliance.hasAtcud || Boolean(qrData?.atcud),
+        atcud: qrData?.atcud || (data.digitalCompliance as any).atcud,
         qrCodeText: qrText,
         qrTotalAmount: qrTotal,
         calculatedLinesTotal,

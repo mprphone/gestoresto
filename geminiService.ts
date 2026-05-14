@@ -25,6 +25,7 @@ export interface InvoiceExtractedData {
   digitalCompliance: {
     hasQrCode: boolean;
     hasAtcud: boolean;
+    atcud?: string;
     isCompliant: boolean;
     imageQualityOk: boolean;
     complianceNotes?: string;

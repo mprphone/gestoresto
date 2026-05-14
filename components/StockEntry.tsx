@@ -3,8 +3,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Camera, Upload, Check, X, PlusCircle, RefreshCcw, Copy } from 'lucide-react';
 import { processInvoiceImage, InvoiceExtractedData } from '../geminiService';
-import { Product, Category, Supplier, PurchaseInvoice, ProductAlias, StockEntryLineInput } from '../types';
-import { normalizeInvoiceImage, normalizeWithoutCrop, detectDocumentCrop, CropProposal, PageQuality, scanQrFromCanvas, scanQrPayloads, validateInvoiceTotals } from './stock-entry/invoiceProcessor';
+import { Product, Category, Supplier, PurchaseInvoice, ProductAlias, StockEntryLineInput, RestaurantProfile } from '../types';
+import { normalizeInvoiceImage, normalizeWithoutCrop, detectDocumentCrop, CropProposal, PageQuality, PortugueseQrData, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads, validateInvoiceTotals } from './stock-entry/invoiceProcessor';
 import { buildProductMatches, confidenceStyle, normalizeNif } from './stock-entry/productMatcher';
 
 interface StockEntryProps {
@@ -44,6 +44,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [nifMismatch, setNifMismatch] = useState<string | null>(null);
   const [liveQrNifError, setLiveQrNifError] = useState<string | null>(null);
   const [qrPayloads, setQrPayloads] = useState<string[]>([]);
+  const [qrData, setQrData] = useState<PortugueseQrData | null>(null);
   const [pageQualities, setPageQualities] = useState<PageQuality[]>([]);
   const [cameraViewportHeight, setCameraViewportHeight] = useState(720);
   const [pendingCapture, setPendingCapture] = useState<{
@@ -72,15 +73,26 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   // Keep ref pointing to latest captureCameraPage (avoids stale closures in scan timer)
   useEffect(() => { captureCameraPageRef.current = captureCameraPage; });
 
+  const applyQrData = (qrText: string) => {
+    const parsed = parsePortugueseQrData(qrText);
+    setQrData(parsed);
+    if (parsed.supplierNif) {
+      setNif(parsed.supplierNif);
+      const knownSupplier = suppliers.find(s => normalizeNif(s.nif || '') === parsed.supplierNif);
+      if (knownSupplier?.name) setSupplier(knownSupplier.name);
+    }
+    if (parsed.documentNumber) setDocNumber(parsed.documentNumber);
+    return parsed;
+  };
+
   // Returns error message if buyer NIF in QR is invalid for this restaurant, null if OK
-  const checkQrBuyerNif = (qrText: string): string | null => {
-    const fields: Record<string, string> = {};
-    qrText.split('*').forEach(p => { const i = p.indexOf(':'); if (i > 0) fields[p.slice(0, i)] = p.slice(i + 1); });
-    const buyerNif = (fields['B'] || '').replace(/\D/g, '');
+  const checkQrBuyerNif = (qr: string | PortugueseQrData): string | null => {
+    const parsed = typeof qr === 'string' ? parsePortugueseQrData(qr) : qr;
+    const buyerNif = parsed.customerNif || '';
     if (!buyerNif) return null;
     if (buyerNif === '999999990') return 'Fatura para Consumidor Final — solicite fatura com o NIF do restaurante';
     const restNif = (restaurantProfile?.nif || '').replace(/\D/g, '');
-    if (restNif && buyerNif !== restNif) return `NIF do comprador (${buyerNif}) ≠ NIF do restaurante (${restNif})`;
+    if (restNif && buyerNif !== restNif) return `NIF do comprador no QR (${buyerNif}) não coincide com o NIF da empresa/restaurante (${restNif})`;
     return null;
   };
 
@@ -119,14 +131,18 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           }
 
           if (qrText) {
-            const nifErr = checkQrBuyerNif(qrText);
+            const parsedQr = applyQrData(qrText);
+            setQrPayloads(prev => prev.includes(qrText) ? prev : [...prev, qrText]);
+            const nifErr = checkQrBuyerNif(parsedQr);
             if (nifErr) {
               setLiveQrNifError(nifErr);
+              setNifMismatch(nifErr);
               // Keep scanning — user may move to correct invoice
               if (active) setTimeout(scan, 1200);
               return;
             }
             setLiveQrNifError(null);
+            setNifMismatch(null);
             setQrLiveDetected(true); // latch green — NIF OK
             return;
           }
@@ -137,7 +153,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
     scan();
     return () => { active = false; };
-  }, [isCameraReady, isCameraOpen, qrLiveDetected]);
+  }, [isCameraReady, isCameraOpen, qrLiveDetected, suppliers, restaurantProfile?.nif]);
 
   useEffect(() => {
     if (!isCameraOpen) return;
@@ -255,28 +271,21 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         setProcessingError(warnings.join(' '));
       }
 
-      // Check buyer NIF (field B in QR) against restaurant NIF
-      const qrBuyerNif = (() => {
-        for (const payload of currentQrPayloads) {
-          if (!payload) continue;
-          const fields: Record<string, string> = {};
-          payload.split('*').forEach(p => { const i = p.indexOf(':'); if (i > 0) fields[p.slice(0, i)] = p.slice(i + 1); });
-          const b = (fields['B'] || '').replace(/\D/g, '');
-          if (b) return b;
-        }
-        return null;
-      })();
-      const restaurantNif = (restaurantProfile?.nif || '').replace(/\D/g, '');
-      if (qrBuyerNif === '999999990') {
-        setNifMismatch('Esta fatura é emitida para Consumidor Final e não pode ser registada. Solicite uma fatura com o NIF do restaurante.');
-      } else if (qrBuyerNif && restaurantNif && qrBuyerNif !== restaurantNif) {
-        setNifMismatch(`O NIF do comprador no QR (${qrBuyerNif}) não coincide com o NIF do restaurante (${restaurantNif}). Não é possível registar esta fatura.`);
+      const firstQrData = currentQrPayloads.length > 0 ? parsePortugueseQrData(currentQrPayloads[0]) : null;
+      if (firstQrData) setQrData(firstQrData);
+      if (!firstQrData && validation.data.qrCodeText) setQrData(parsePortugueseQrData(validation.data.qrCodeText));
+      const qrNifError = firstQrData ? checkQrBuyerNif(firstQrData) : null;
+      if (qrNifError) {
+        setNifMismatch(`${qrNifError}. Não é possível registar esta fatura.`);
       } else {
         setNifMismatch(null);
       }
 
       setExtractedData(validation.data);
-      setSupplier(validation.data.supplierName || '');
+      const qrSupplier = firstQrData?.supplierNif
+        ? suppliers.find(s => normalizeNif(s.nif || '') === firstQrData.supplierNif)
+        : undefined;
+      setSupplier(qrSupplier?.name || validation.data.supplierName || supplier || '');
       setNif(normalizeNif(validation.data.supplierNif || ''));
       setDocNumber(validation.data.invoiceNumber || '');
 
@@ -288,7 +297,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         hasQrCode: q.hasQrCode || geminiFoundQr
       })));
       if (geminiFoundQr) {
-        setQrPayloads((prev: string[]) => prev.length > 0 ? prev : [validation.data.qrCodeText || '']);
+        setQrPayloads((prev: string[]) => prev.length > 0 || !validation.data.qrCodeText ? prev : [validation.data.qrCodeText]);
       }
       
       const matches = await buildProductMatches({
@@ -344,6 +353,18 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       setOriginalPages(updatedOriginals);
       setQrPayloads(updatedQrPayloads);
       setPageQualities(updatedQualities);
+
+      const firstQrPayload = updatedQrPayloads[0];
+      if (firstQrPayload) {
+        const parsedQr = applyQrData(firstQrPayload);
+        const nifErr = checkQrBuyerNif(parsedQr);
+        if (nifErr) {
+          setNifMismatch(nifErr);
+          setIsProcessing(false);
+          return;
+        }
+        setNifMismatch(null);
+      }
       await processAllPages(updatedOriginals, updatedQrPayloads);
     } catch (error) {
       setProcessingError('Não consegui abrir essa fotografia. Tente outro ficheiro ou tire uma nova foto.');
@@ -399,8 +420,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setPageQualities(prev => [...prev, { ...normalized.quality, hasQrCode: Boolean(newQrPayloads[0]) }]);
 
     // NIF check immediately after capture — before calling Gemini
-    if (newQrPayloads.length > 0) {
-      const nifErr = checkQrBuyerNif(newQrPayloads[0]);
+    if (updatedQrPayloads.length > 0) {
+      const parsedQr = applyQrData(updatedQrPayloads[0]);
+      const nifErr = checkQrBuyerNif(parsedQr);
       if (nifErr) {
         closeCamera();
         setNifMismatch(nifErr);
@@ -447,8 +469,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setQrPayloads(updatedQrPayloads);
     setPageQualities((prev: PageQuality[]) => [...prev, { ...normalized.quality, hasQrCode: Boolean(newQrPayloads[0]) }]);
 
-    if (newQrPayloads.length > 0) {
-      const nifErr = checkQrBuyerNif(newQrPayloads[0]);
+    if (updatedQrPayloads.length > 0) {
+      const parsedQr = applyQrData(updatedQrPayloads[0]);
+      const nifErr = checkQrBuyerNif(parsedQr);
       if (nifErr) { setNifMismatch(nifErr); return; }
     }
     setNifMismatch(null);
@@ -501,9 +524,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       const invoicePhotos = sourcePages.map(page => page.startsWith('data:') ? page : `data:image/jpeg;base64,${page}`);
       onComplete(itemsToSubmit, invoicePhotos[0], { name: supplier, nif }, {
         docNumber,
+        dateIssued: qrData?.documentDate,
         totalAmount: extractedData.totalInvoiceAmount,
         customerName: extractedData.customerName,
-        customerNif: extractedData.customerNif,
+        customerNif: qrData?.customerNif || extractedData.customerNif,
         qrCodeText: extractedData.qrCodeText || extractedData.digitalCompliance.qrCodeText,
         qrTotalAmount: extractedData.qrTotalAmount ?? extractedData.digitalCompliance.qrTotalAmount,
         calculatedLinesTotal: extractedData.calculatedLinesTotal ?? extractedData.digitalCompliance.calculatedLinesTotal,
@@ -598,6 +622,17 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       {liveQrNifError && (
         <div className="absolute top-20 left-4 right-4 z-20 p-3 rounded-2xl bg-red-500/95 text-white text-[10px] font-black uppercase flex items-center gap-2">
           <X size={14} className="shrink-0" /> {liveQrNifError}
+        </div>
+      )}
+
+      {qrLiveDetected && qrData && !liveQrNifError && (
+        <div className="absolute top-20 left-4 right-4 z-20 p-3 rounded-2xl bg-emerald-500/95 text-white text-[10px] font-black uppercase space-y-1">
+          <div className="flex items-center gap-2">
+            <Check size={14} className="shrink-0" /> QR fiscal lido e NIF validado
+          </div>
+          <p className="opacity-85">
+            Forn. {qrData.supplierNif || '-'} · Cliente {qrData.customerNif || '-'} · Total {qrData.totalAmount ? `€ ${qrData.totalAmount.toFixed(2)}` : '-'}
+          </p>
         </div>
       )}
 
@@ -714,7 +749,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
             <p className="font-black text-red-700 text-sm uppercase tracking-wide mb-1">Fatura não pode ser registada</p>
             <p className="text-sm font-bold text-red-600">{nifMismatch}</p>
             <button
-              onClick={() => { setPages([]); setOriginalPages([]); setQrPayloads([]); setPageQualities([]); setNifMismatch(null); setProcessingError(null); }}
+              onClick={() => { setPages([]); setOriginalPages([]); setQrPayloads([]); setQrData(null); setPageQualities([]); setNifMismatch(null); setProcessingError(null); }}
               className="mt-4 px-5 py-2.5 bg-red-600 text-white rounded-xl text-xs font-black hover:bg-red-700 transition-colors"
             >
               Descartar — Tirar Nova Foto
@@ -735,7 +770,11 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                         <button onClick={() => {
                           setPages(prev => prev.filter((_, i) => i !== idx));
                           setOriginalPages(prev => prev.filter((_, i) => i !== idx));
-                          setQrPayloads(prev => prev.filter((_, i) => i !== idx));
+                          setQrPayloads(prev => {
+                            const next = prev.filter((_, i) => i !== idx);
+                            setQrData(next[0] ? parsePortugueseQrData(next[0]) : null);
+                            return next;
+                          });
                           setPageQualities(prev => prev.filter((_, i) => i !== idx));
                           setProcessingError(null);
                         }} className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"><X size={14} /></button>
@@ -755,6 +794,23 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                     <p className="text-[10px] font-bold opacity-70 mt-1">
                       QR {qrPayloads.length > 0 ? 'lido' : 'não lido diretamente'} · Margens ajustadas automaticamente
                     </p>
+                  </div>
+                )}
+                {qrData && (
+                  <div className={`mb-4 p-4 rounded-2xl border ${nifMismatch ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700'}`}>
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <p className="text-[10px] font-black uppercase">Dados fiscais do QR</p>
+                      <span className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase ${nifMismatch ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                        {nifMismatch ? 'NIF errado' : 'QR válido'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
+                      <p>Fornecedor: <span className="font-black">{qrData.supplierNif || '-'}</span></p>
+                      <p>Comprador: <span className="font-black">{qrData.customerNif || '-'}</span></p>
+                      <p>Documento: <span className="font-black">{qrData.documentNumber || '-'}</span></p>
+                      <p>Total: <span className="font-black">{qrData.totalAmount ? `€ ${qrData.totalAmount.toFixed(2)}` : '-'}</span></p>
+                      {qrData.atcud && <p className="col-span-2">ATCUD: <span className="font-black">{qrData.atcud}</span></p>}
+                    </div>
                   </div>
                 )}
                 {isProcessing && <div className="flex items-center gap-3 p-4 bg-orange-50 rounded-2xl border border-orange-100 animate-pulse"><RefreshCcw className="animate-spin text-orange-500" size={20} /><p className="text-[10px] font-black text-orange-600 uppercase">Lendo Artigos...</p></div>}
@@ -786,6 +842,27 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                       <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-2xl">
                         <span className="text-red-500 text-lg leading-none shrink-0">⚠</span>
                         <p className="text-xs font-bold text-red-700">{nifMismatch}</p>
+                      </div>
+                    )}
+                    {qrData && (
+                      <div className={`p-4 rounded-2xl border ${nifMismatch ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700'}`}>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest">QR fiscal</p>
+                            <p className="text-[10px] font-bold opacity-80 mt-1">
+                              Estes dados vêm diretamente do QR da Autoridade Tributária.
+                            </p>
+                          </div>
+                          <span className={`self-start sm:self-auto px-3 py-1.5 rounded-xl text-[9px] font-black uppercase ${nifMismatch ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            {nifMismatch ? 'NIF comprador inválido' : 'NIF comprador OK'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-bold">
+                          <p>Fornecedor<br /><span className="font-black">{qrData.supplierNif || '-'}</span></p>
+                          <p>Comprador<br /><span className="font-black">{qrData.customerNif || '-'}</span></p>
+                          <p>Documento<br /><span className="font-black">{qrData.documentNumber || '-'}</span></p>
+                          <p>Total QR<br /><span className="font-black">{qrData.totalAmount ? `€ ${qrData.totalAmount.toFixed(2)}` : '-'}</span></p>
+                        </div>
                       </div>
                     )}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6">

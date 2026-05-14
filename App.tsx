@@ -75,6 +75,19 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  const activeRestaurantProfile: RestaurantProfile | null = restaurantProfile || (currentRestaurant ? {
+    id: currentRestaurant.id,
+    name: currentRestaurant.name,
+    nif: currentRestaurant.nif || '',
+    legalName: currentRestaurant.legalName,
+    email: currentRestaurant.email,
+    phone: currentRestaurant.phone,
+    address: currentRestaurant.address,
+    postalCode: currentRestaurant.postalCode,
+    city: currentRestaurant.city,
+    country: currentRestaurant.country,
+    notificationEmails: currentRestaurant.notificationEmails
+  } : null);
 
   const runAction = async (work: () => Promise<void>, successMessage?: string) => {
     try {
@@ -347,7 +360,7 @@ const App: React.FC = () => {
       customerNif: invoiceData?.customerNif,
       docNumber: invoiceData?.docNumber || 'S/N',
       totalAmount: invoiceData?.totalAmount || 0,
-      dateIssued: new Date().toISOString().split('T')[0],
+      dateIssued: invoiceData?.dateIssued || new Date().toISOString().split('T')[0],
       status: InvoiceStatus.PENDING,
       paidAmount: 0,
       archiveDocumentId: archiveDocument?.id,
@@ -551,7 +564,7 @@ const App: React.FC = () => {
           {!isLoading && !loadError && <>
           {activeTab === 'dash' && <Dashboard products={products} movements={movements} />}
           {activeTab === 'inv' && <InventoryList products={products} movements={movements} categories={categories} onUpdateProduct={handleUpdateProduct} />}
-          {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} productAliases={productAliases} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} restaurantProfile={restaurantProfile} />}
+          {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} productAliases={productAliases} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} restaurantProfile={activeRestaurantProfile} />}
           {activeTab === 'move' && <StockMovement products={products} movements={movements} onTransfer={handleStockMovement} categories={categories} hideStock={isFuncionario} />}
           {activeTab === 'review' && currentUser && currentRestaurant && (
             <InvoiceReview
