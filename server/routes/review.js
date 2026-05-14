@@ -10,7 +10,7 @@ reviewRouter.get('/pending', async (_req, res, next) => {
       select
         pi.id, pi.doc_number, pi.supplier_name, pi.supplier_nif,
         pi.total_amount, pi.date_issued, pi.created_at,
-        pi.has_qr_code, pi.qr_total_amount, pi.total_validation_status,
+        pi.has_qr_code, pi.qr_code_text, pi.qr_total_amount, pi.total_validation_status,
         pi.reviewed_at, pi.reviewed_by,
         u.name as reviewed_by_name,
         count(pil.id)::int as line_count,
@@ -20,11 +20,22 @@ reviewRouter.get('/pending', async (_req, res, next) => {
       from purchase_invoices pi
       left join app_users u on u.id = pi.reviewed_by
       left join purchase_invoice_lines pil on pil.invoice_id = pi.id
-      left join digital_archive_documents dad
-        on dad.id = pi.primary_archive_document_id
-        or (dad.invoice_id = pi.id and dad.document_type = 'FATURA')
+      left join lateral (
+        select id, mime_type, original_filename
+        from digital_archive_documents
+        where id = pi.primary_archive_document_id
+           or (invoice_id = pi.id and document_type = 'FATURA')
+        order by
+          case mime_type
+            when 'image/jpeg' then 1
+            when 'image/png'  then 2
+            when 'application/pdf' then 3
+            else 4
+          end
+        limit 1
+      ) dad on true
       where pi.reviewed_at is null
-      group by pi.id, u.name, dad.id
+      group by pi.id, u.name, dad.id, dad.mime_type, dad.original_filename
       order by pi.created_at desc
     `);
     res.json({ data: result.rows });

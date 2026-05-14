@@ -95,6 +95,13 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, onReviewed }
             ? apiUrl(`/api/archive/file/${inv.archive_id}`)
             : undefined;
           const isPdf = inv.archive_mime_type === 'application/pdf';
+          const isCreditNote = (() => {
+            const dn = (inv.doc_number || '').toUpperCase().trim();
+            if (dn.startsWith('NC') || dn.startsWith('N/C')) return true;
+            const qr = inv.qr_code_text || '';
+            const m = qr.match(/\*?D:([^*]+)/);
+            return m ? m[1].trim().toUpperCase() === 'NC' : false;
+          })();
 
           return (
             <div
@@ -126,12 +133,22 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, onReviewed }
                         {inv.doc_number || 'S/N'} · {new Date(inv.created_at).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                       </p>
                     </div>
-                    <p className="font-black text-lg text-slate-900 flex-shrink-0">
-                      € {Number(inv.total_amount || 0).toFixed(2)}
-                    </p>
+                    <div className="text-right flex-shrink-0">
+                      {isCreditNote && (
+                        <p className="text-[9px] font-black uppercase text-red-500 tracking-wide mb-0.5">Nota de Crédito</p>
+                      )}
+                      <p className={`font-black text-lg ${isCreditNote ? 'text-red-600' : 'text-slate-900'}`}>
+                        {isCreditNote ? '−' : ''}€ {Number(inv.total_amount || 0).toFixed(2)}
+                      </p>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-3 mt-3 flex-wrap">
+                    {isCreditNote && (
+                      <span className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-red-50 text-red-600 border border-red-200">
+                        ⚠ NC — Não entra em stock
+                      </span>
+                    )}
                     <span className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-slate-50 text-slate-500">
                       {inv.line_count} artigo{inv.line_count !== 1 ? 's' : ''}
                     </span>
