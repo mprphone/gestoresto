@@ -4,6 +4,25 @@ import { config } from '../config.js';
 
 export const geminiRouter = Router();
 
+function geminiUserMessage(error) {
+  const raw = String(error?.message || '');
+  if (error?.status === 429 || raw.includes('RESOURCE_EXHAUSTED') || raw.includes('Quota exceeded')) {
+    const retryMatch = raw.match(/retry(?:Delay| in)[^0-9]*([0-9]+(?:\.[0-9]+)?)/i);
+    const retry = retryMatch ? ` Tente novamente dentro de cerca de ${Math.ceil(Number(retryMatch[1]))} segundos.` : '';
+    return {
+      status: 429,
+      message: `Limite da IA Gemini atingido para este modelo. A foto não chegou a ser analisada.${retry}`
+    };
+  }
+  if (error?.status === 400 || raw.includes('Request payload size exceeds') || raw.includes('too large')) {
+    return {
+      status: 413,
+      message: 'A imagem ficou demasiado pesada para análise IA. Tente uma foto um pouco mais próxima e sem fundo desnecessário.'
+    };
+  }
+  return null;
+}
+
 const GEMINI_PROMPT = `Analise este documento de compra (fatura, nota de entrega, guia de remessa, nota de equipamento ou similar).
 
 EXTRAÇÃO DE ARTIGOS — REGRA PRINCIPAL:
@@ -130,6 +149,8 @@ geminiRouter.post('/analyze-invoice', async (req, res, next) => {
     res.json(parsed);
   } catch (error) {
     console.error('Gemini analyze error:', error);
+    const userError = geminiUserMessage(error);
+    if (userError) return res.status(userError.status).json({ error: userError.message });
     next(error);
   }
 });

@@ -43,10 +43,5 @@ export interface InvoiceExtractedData {
 import { apiPost } from './data/apiClient';
 
 export const processInvoiceImage = async (base64Images: string[]): Promise<InvoiceExtractedData | null> => {
-  try {
-    return await apiPost<InvoiceExtractedData>('/api/gemini/analyze-invoice', { images: base64Images });
-  } catch (error) {
-    console.error('Erro no processamento IA:', error);
-    return null;
-  }
+  return apiPost<InvoiceExtractedData>('/api/gemini/analyze-invoice', { images: base64Images });
 };
