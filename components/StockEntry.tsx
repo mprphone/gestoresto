@@ -42,6 +42,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [nifMismatch, setNifMismatch] = useState<string | null>(null);
+  const [liveQrNifError, setLiveQrNifError] = useState<string | null>(null);
   const [qrPayloads, setQrPayloads] = useState<string[]>([]);
   const [pageQualities, setPageQualities] = useState<PageQuality[]>([]);
   const [cameraViewportHeight, setCameraViewportHeight] = useState(720);
@@ -71,6 +72,18 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   // Keep ref pointing to latest captureCameraPage (avoids stale closures in scan timer)
   useEffect(() => { captureCameraPageRef.current = captureCameraPage; });
 
+  // Returns error message if buyer NIF in QR is invalid for this restaurant, null if OK
+  const checkQrBuyerNif = (qrText: string): string | null => {
+    const fields: Record<string, string> = {};
+    qrText.split('*').forEach(p => { const i = p.indexOf(':'); if (i > 0) fields[p.slice(0, i)] = p.slice(i + 1); });
+    const buyerNif = (fields['B'] || '').replace(/\D/g, '');
+    if (!buyerNif) return null;
+    if (buyerNif === '999999990') return 'Fatura para Consumidor Final — solicite fatura com o NIF do restaurante';
+    const restNif = (restaurantProfile?.nif || '').replace(/\D/g, '');
+    if (restNif && buyerNif !== restNif) return `NIF do comprador (${buyerNif}) ≠ NIF do restaurante (${restNif})`;
+    return null;
+  };
+
   // Live QR scan: scans every 600ms until QR is found, then LATCHES green.
   // Once detected, brackets stay green regardless of phone movement so the
   // user can re-frame the full invoice before tapping capture.
@@ -87,27 +100,35 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       const video = videoRef.current;
       if (video && video.readyState >= 2) {
         try {
+          let qrText: string | null = null;
+
           if (detector) {
             const codes = await detector.detect(video);
-            if (codes.length > 0 && codes[0]?.rawValue) {
-              setQrLiveDetected(true); // latch — stop scanning, stay green
-              return;
+            if (codes.length > 0 && codes[0]?.rawValue) qrText = codes[0].rawValue;
+          }
+          if (!qrText && ctx) {
+            const sw = video.videoWidth || 0;
+            const sh = video.videoHeight || 0;
+            if (sw > 0 && sh > 0) {
+              const scanWidth = Math.min(720, sw);
+              canvas.width = scanWidth;
+              canvas.height = Math.round(scanWidth * (sh / sw));
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              qrText = scanQrFromCanvas(canvas) || null;
             }
           }
-          if (ctx) {
-            const sourceWidth = video.videoWidth || 0;
-            const sourceHeight = video.videoHeight || 0;
-            if (sourceWidth > 0 && sourceHeight > 0) {
-              const scanWidth = Math.min(720, sourceWidth);
-              const scanHeight = Math.round(scanWidth * (sourceHeight / sourceWidth));
-              canvas.width = scanWidth;
-              canvas.height = scanHeight;
-              ctx.drawImage(video, 0, 0, scanWidth, scanHeight);
-              if (scanQrFromCanvas(canvas)) {
-                setQrLiveDetected(true);
-                return;
-              }
+
+          if (qrText) {
+            const nifErr = checkQrBuyerNif(qrText);
+            if (nifErr) {
+              setLiveQrNifError(nifErr);
+              // Keep scanning — user may move to correct invoice
+              if (active) setTimeout(scan, 1200);
+              return;
             }
+            setLiveQrNifError(null);
+            setQrLiveDetected(true); // latch green — NIF OK
+            return;
           }
         } catch { /* ignore per-frame errors */ }
       }
@@ -207,6 +228,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setCameraIsMultiMode(false);
     setCapturedParts(0);
     setQrLiveDetected(false);
+    setLiveQrNifError(null);
   };
 
   const processAllPages = async (currentPages: string[], currentQrPayloads = qrPayloads) => {
@@ -331,6 +353,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
   const captureCameraPage = async () => {
     setQrLiveDetected(false);
+    setLiveQrNifError(null);
     const video = videoRef.current;
     if (!video || !isCameraReady || video.readyState < 2) {
       setCameraError('A câmara ainda não está pronta. Aguarde um momento e tente novamente.');
@@ -534,19 +557,30 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         </button>
       </div>
 
-      {/* QR scanner brackets — green when QR is in frame, white while scanning */}
+      {/* QR scanner brackets — green=OK, red=NIF error, white=scanning */}
       {isCameraReady && (
         <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center">
           <div className="relative w-64 h-64">
-            <span className={`absolute top-0 left-0 w-12 h-12 border-t-4 border-l-4 rounded-tl-xl transition-colors duration-300 ${qrLiveDetected ? 'border-emerald-400' : 'border-white/70'}`} />
-            <span className={`absolute top-0 right-0 w-12 h-12 border-t-4 border-r-4 rounded-tr-xl transition-colors duration-300 ${qrLiveDetected ? 'border-emerald-400' : 'border-white/70'}`} />
-            <span className={`absolute bottom-0 left-0 w-12 h-12 border-b-4 border-l-4 rounded-bl-xl transition-colors duration-300 ${qrLiveDetected ? 'border-emerald-400' : 'border-white/70'}`} />
-            <span className={`absolute bottom-0 right-0 w-12 h-12 border-b-4 border-r-4 rounded-br-xl transition-colors duration-300 ${qrLiveDetected ? 'border-emerald-400' : 'border-white/70'}`} />
-            {/* Status label inside brackets */}
-            <span className={`absolute inset-0 flex items-center justify-center text-[10px] font-black uppercase tracking-widest transition-colors duration-300 ${qrLiveDetected ? 'text-emerald-400' : 'text-white/40'}`}>
-              {qrLiveDetected ? '✓ QR OK' : 'QR...'}
+            {(['tl','tr','bl','br'] as const).map(c => (
+              <span key={c} className={`absolute w-12 h-12 transition-colors duration-300
+                ${liveQrNifError ? 'border-red-400' : qrLiveDetected ? 'border-emerald-400' : 'border-white/70'}
+                ${c==='tl' ? 'top-0 left-0 border-t-4 border-l-4 rounded-tl-xl' : ''}
+                ${c==='tr' ? 'top-0 right-0 border-t-4 border-r-4 rounded-tr-xl' : ''}
+                ${c==='bl' ? 'bottom-0 left-0 border-b-4 border-l-4 rounded-bl-xl' : ''}
+                ${c==='br' ? 'bottom-0 right-0 border-b-4 border-r-4 rounded-br-xl' : ''}`} />
+            ))}
+            <span className={`absolute inset-0 flex items-center justify-center text-[10px] font-black uppercase tracking-widest transition-colors duration-300
+              ${liveQrNifError ? 'text-red-400' : qrLiveDetected ? 'text-emerald-400' : 'text-white/40'}`}>
+              {liveQrNifError ? '✗ NIF' : qrLiveDetected ? '✓ QR OK' : 'QR...'}
             </span>
           </div>
+        </div>
+      )}
+
+      {/* NIF error banner — shown immediately when QR is detected with wrong NIF */}
+      {liveQrNifError && (
+        <div className="absolute top-20 left-4 right-4 z-20 p-3 rounded-2xl bg-red-500/95 text-white text-[10px] font-black uppercase flex items-center gap-2">
+          <X size={14} className="shrink-0" /> {liveQrNifError}
         </div>
       )}
 
