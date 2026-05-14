@@ -911,6 +911,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                             const selectedProduct = products.find(p => p.id === mapping[idx]) || autoCreatedProducts[mapping[idx]];
                             const factor = conversionFactors[idx] || 1;
                             const stockQty = item.quantity * factor;
+                            const stockActionLabel = isCreditDocument ? 'Abate' : 'Entra';
                             return (
                               <div key={idx} className={`p-3 sm:p-6 rounded-2xl sm:rounded-[2rem] border transition-all ${isMapped ? 'bg-white border-slate-100 shadow-sm' : 'bg-orange-50 border-orange-100'}`}>
                                 <div className="flex flex-col md:flex-row gap-3 sm:gap-6">
@@ -927,8 +928,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                        <div className="space-y-1"><label className="text-[8px] font-black text-slate-400 uppercase">Família</label><select className="w-full px-3 sm:px-4 py-3 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase outline-none" value={currentFamily} onChange={(e) => { setItemFamilies(prev => ({ ...prev, [idx]: e.target.value })); setMapping(prev => { const n = {...prev}; delete n[idx]; return n; }); }}>{categories.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
                                        <div className="space-y-1 sm:hidden">
-                                         <label className="text-[8px] font-black text-slate-400 uppercase">Entra</label>
-                                         <div className="px-3 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase">{stockQty.toFixed(3)} {selectedProduct?.unit || 'un'}</div>
+                                         <label className="text-[8px] font-black text-slate-400 uppercase">{stockActionLabel}</label>
+                                         <div className={`px-3 py-3 text-white rounded-xl text-[10px] font-black uppercase ${isCreditDocument ? 'bg-red-700' : 'bg-slate-900'}`}>{stockQty.toFixed(3)} {selectedProduct?.unit || 'un'}</div>
                                        </div>
                                      </div>
                                      <div className="space-y-2"><label className="text-[8px] font-black text-slate-400 uppercase">Inventário</label>
@@ -955,8 +956,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                                          <input type="number" step="0.001" min="0.001" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase outline-none" value={factor} onChange={(e) => setConversionFactors(prev => ({ ...prev, [idx]: Number(e.target.value) || 1 }))} />
                                        </div>
                                        <div className="space-y-1">
-                                         <label className="text-[8px] font-black text-slate-400 uppercase">Entra Stock</label>
-                                         <div className="px-3 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase">{stockQty.toFixed(3)} {selectedProduct?.unit || 'un'}</div>
+                                         <label className="text-[8px] font-black text-slate-400 uppercase">{stockActionLabel} Stock</label>
+                                         <div className={`px-3 py-2 text-white rounded-xl text-[10px] font-black uppercase ${isCreditDocument ? 'bg-red-700' : 'bg-slate-900'}`}>{stockQty.toFixed(3)} {selectedProduct?.unit || 'un'}</div>
                                        </div>
                                      </div>
                                   </div>

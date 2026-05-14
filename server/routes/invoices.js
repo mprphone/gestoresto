@@ -309,6 +309,28 @@ function isCreditNote(payload) {
     Number(payload.totalAmount || 0) < 0;
 }
 
+async function assertCreditStockAvailable(client, payload, restaurantId) {
+  for (const line of (payload.lines || [])) {
+    if (!line.productId) continue;
+    const quantityStock = Math.abs(Number(line.quantityStock || 0));
+    if (quantityStock <= 0) continue;
+    const productResult = await client.query(
+      'select id, name, current_stock, unit from products where id = $1 and restaurant_id = $2 for update',
+      [line.productId, restaurantId]
+    );
+    const product = productResult.rows[0];
+    if (!product) continue;
+    const currentStock = Number(product.current_stock || 0);
+    if (currentStock < quantityStock) {
+      const error = new Error(
+        `Stock insuficiente para nota de crédito: ${product.name} tem ${currentStock.toFixed(3)} ${product.unit || ''} e a nota tenta abater ${quantityStock.toFixed(3)} ${line.unitStock || product.unit || ''}.`
+      );
+      error.statusCode = 422;
+      throw error;
+    }
+  }
+}
+
 invoicesRouter.post('/', async (req, res, next) => {
   try {
     const payload = req.body;
@@ -338,6 +360,7 @@ invoicesRouter.post('/', async (req, res, next) => {
         throw error;
       }
       await assertNotDuplicateInvoice(client, payload, req.restaurantId);
+      if (isCredit) await assertCreditStockAvailable(client, payload, req.restaurantId);
       let supplierId = payload.supplierId || null;
       if (!supplierId && payload.supplierNif) {
         const normalizedSupplierNif = onlyDigits(payload.supplierNif);
@@ -542,7 +565,9 @@ invoicesRouter.post('/', async (req, res, next) => {
           const currentValue = currentStock * averagePrice;
           const incomingValue = Number(line.quantityOriginal || 0) * unitPrice;
           const totalStock = currentStock + quantityStock;
-          const newAveragePrice = totalStock > 0 ? (currentValue + incomingValue) / totalStock : unitPrice;
+          const newAveragePrice = quantityStock < 0
+            ? averagePrice
+            : (totalStock > 0 ? (currentValue + incomingValue) / totalStock : unitPrice);
 
           const productAfter = await client.query(`
             update products
