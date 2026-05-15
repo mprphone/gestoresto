@@ -518,12 +518,18 @@ invoicesRouter.post('/', async (req, res, next) => {
         : (payload.archiveDocumentId ? [payload.archiveDocumentId] : []);
       const archiveDocuments = [];
       for (const archiveDocumentId of archiveDocumentIds) {
-        const archive = await client.query(`
-          update digital_archive_documents
-          set invoice_id = $1, supplier_id = coalesce($2, supplier_id), restaurant_id = $4
-          where id = $3 and (restaurant_id = $4 or restaurant_id is null)
-          returning *
-        `, [invoiceId, supplierId, archiveDocumentId, req.restaurantId]);
+        const archive = payload.reuseArchiveDocuments
+          ? await client.query(`
+              select *
+              from digital_archive_documents
+              where id = $1 and restaurant_id = $2
+            `, [archiveDocumentId, req.restaurantId])
+          : await client.query(`
+              update digital_archive_documents
+              set invoice_id = $1, supplier_id = coalesce($2, supplier_id), restaurant_id = $4
+              where id = $3 and (restaurant_id = $4 or restaurant_id is null)
+              returning *
+            `, [invoiceId, supplierId, archiveDocumentId, req.restaurantId]);
         if (archive.rows[0]) archiveDocuments.push(archive.rows[0]);
       }
       archiveDocument = archiveDocuments[0] || null;
