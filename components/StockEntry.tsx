@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Camera, Upload, Check, X, PlusCircle, RefreshCcw, Copy } from 'lucide-react';
 import { processInvoiceImage, InvoiceExtractedData } from '../geminiService';
 import { Product, Category, Supplier, PurchaseInvoice, ProductAlias, StockEntryLineInput, RestaurantProfile } from '../types';
-import { normalizeWithoutCrop, PageQuality, PortugueseQrData, normalizePortugueseDocumentType, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads, validateInvoiceTotals } from './stock-entry/invoiceProcessor';
+import { analyzeCanvasQuality, normalizeWithoutCrop, PageQuality, PortugueseQrData, normalizePortugueseDocumentType, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads, validateInvoiceTotals } from './stock-entry/invoiceProcessor';
 import { buildProductMatches, confidenceStyle, normalizeNif } from './stock-entry/productMatcher';
 
 interface StockEntryProps {
@@ -43,6 +43,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [nifMismatch, setNifMismatch] = useState<string | null>(null);
   const [liveQrNifError, setLiveQrNifError] = useState<string | null>(null);
+  const [livePageQuality, setLivePageQuality] = useState<PageQuality | null>(null);
   const [qrPayloads, setQrPayloads] = useState<string[]>([]);
   const [qrData, setQrData] = useState<PortugueseQrData | null>(null);
   const [pageQualities, setPageQualities] = useState<PageQuality[]>([]);
@@ -100,6 +101,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     image.src = dataUrl;
   });
 
+  const qualityErrorMessage = (quality: PageQuality) =>
+    `${quality.qualityReasons.join(' · ') || 'Foto sem qualidade suficiente'}. Nitidez ${quality.sharpnessScore}% · Documento ${Math.round(quality.documentAreaRatio * 100)}% da imagem.`;
+
   const prepareOcrPagesForAi = async (sourcePages: string[], forceDetailSlices = false) => {
     const ocrPages: string[] = [];
     for (const page of sourcePages) {
@@ -134,11 +138,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     return ocrPages.length > 0 ? ocrPages : sourcePages;
   };
 
-  // Live QR scan: scans every 600ms until QR is found, then LATCHES green.
-  // Once detected, brackets stay green regardless of phone movement so the
-  // user can re-frame the full invoice before tapping capture.
+  // Live scan keeps measuring archive quality even after the QR latches green.
+  // That lets the operator re-frame the whole invoice before taking the photo.
   useEffect(() => {
-    if (!isCameraReady || !isCameraOpen || qrLiveDetected) return;
+    if (!isCameraReady || !isCameraOpen) return;
     const BarcodeDetectorCtor = (window as any).BarcodeDetector;
     const detector = BarcodeDetectorCtor ? new BarcodeDetectorCtor({ formats: ['qr_code'] }) : null;
     const canvas = document.createElement('canvas');
@@ -156,7 +159,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
             const codes = await detector.detect(video);
             if (codes.length > 0 && codes[0]?.rawValue) qrText = codes[0].rawValue;
           }
-          if (!qrText && ctx) {
+          if (ctx) {
             const sw = video.videoWidth || 0;
             const sh = video.videoHeight || 0;
             if (sw > 0 && sh > 0) {
@@ -164,7 +167,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
               canvas.width = scanWidth;
               canvas.height = Math.round(scanWidth * (sh / sw));
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              qrText = scanQrFromCanvas(canvas) || null;
+              setLivePageQuality(analyzeCanvasQuality(canvas));
+              if (!qrText) qrText = scanQrFromCanvas(canvas) || null;
             }
           }
 
@@ -182,7 +186,6 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
             setLiveQrNifError(null);
             setNifMismatch(null);
             setQrLiveDetected(true); // latch green — NIF OK
-            return;
           }
         } catch { /* ignore per-frame errors */ }
       }
@@ -191,7 +194,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
     scan();
     return () => { active = false; };
-  }, [isCameraReady, isCameraOpen, qrLiveDetected, suppliers, restaurantProfile?.nif]);
+  }, [isCameraReady, isCameraOpen, suppliers, restaurantProfile?.nif]);
 
   useEffect(() => {
     if (!isCameraOpen) return;
@@ -283,6 +286,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setCapturedParts(0);
     setQrLiveDetected(false);
     setLiveQrNifError(null);
+    setLivePageQuality(null);
   };
 
   const processAllPages = async (currentPages: string[], currentQrPayloads = qrPayloads) => {
@@ -349,11 +353,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       setNif(normalizeNif(validation.data.supplierNif || ''));
       setDocNumber(validation.data.invoiceNumber || '');
 
-      // OCR succeeded → mark all pages as readable; update QR flag from Gemini result
+      // OCR success does not override capture quality; archive acceptance still depends on the original photo.
       const geminiFoundQr = Boolean(validation.data.qrCodeText || validation.data.digitalCompliance?.hasQrCode);
       setPageQualities((prev: PageQuality[]) => prev.map((q: PageQuality) => ({
         ...q,
-        isReadable: true,
         hasQrCode: q.hasQrCode || geminiFoundQr
       })));
       if (geminiFoundQr) {
@@ -414,6 +417,13 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       setQrPayloads(updatedQrPayloads);
       setPageQualities(updatedQualities);
 
+      const rejectedQuality = updatedQualities.find(quality => !quality.isReadable);
+      if (rejectedQuality) {
+        setProcessingError(qualityErrorMessage(rejectedQuality));
+        setIsProcessing(false);
+        return;
+      }
+
       const firstQrPayload = updatedQrPayloads[0];
       if (firstQrPayload) {
         const parsedQr = applyQrData(firstQrPayload);
@@ -448,6 +458,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     const rawDataUrl = canvas.toDataURL('image/jpeg', 0.92);
 
     const normalized = await normalizeWithoutCrop(rawDataUrl);
+    if (!normalized.quality.isReadable) {
+      setCameraError(qualityErrorMessage(normalized.quality));
+      return;
+    }
 
     const updated = [...pages, normalized.data];
     const updatedOriginals = [...originalPages, rawDataUrl];
@@ -509,6 +523,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setProcessingError(null);
     setNifMismatch(null);
     setLiveQrNifError(null);
+    setLivePageQuality(null);
     setQrPayloads([]);
     setQrData(null);
     setPageQualities([]);
@@ -638,6 +653,15 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         </button>
       </div>
 
+      {/* Full-document guide — the invoice must fill the frame before capture is allowed. */}
+      {isCameraReady && (
+        <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center px-7 py-28">
+          <div className={`w-full max-w-sm h-full max-h-[70vh] rounded-3xl border-4 border-dashed transition-colors duration-300 ${
+            livePageQuality?.isReadable ? 'border-emerald-400' : 'border-white/60'
+          }`} />
+        </div>
+      )}
+
       {/* QR scanner brackets — green=OK, red=NIF error, white=scanning */}
       {isCameraReady && (
         <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center">
@@ -676,6 +700,16 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         </div>
       )}
 
+      {livePageQuality && !liveQrNifError && (
+        <div className={`absolute left-4 right-4 z-20 p-3 rounded-2xl text-white text-[10px] font-black uppercase ${
+          qrLiveDetected ? 'top-40' : 'top-20'
+        } ${livePageQuality.isReadable ? 'bg-emerald-500/95' : 'bg-orange-500/95'}`}>
+          {livePageQuality.isReadable
+            ? `Boa para arquivo · Nitidez ${livePageQuality.sharpnessScore}% · Documento ${Math.round(livePageQuality.documentAreaRatio * 100)}%`
+            : `${livePageQuality.qualityReasons.join(' · ')} · Nitidez ${livePageQuality.sharpnessScore}% · Documento ${Math.round(livePageQuality.documentAreaRatio * 100)}%`}
+        </div>
+      )}
+
       {/* Multi-mode banner */}
       {cameraIsMultiMode && capturedParts > 0 && !qrLiveDetected && (
         <div className="absolute top-20 left-4 right-4 z-10 p-3 rounded-2xl bg-emerald-500/90 text-white text-[10px] font-black uppercase flex items-center gap-2">
@@ -698,15 +732,23 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         )}
         <button
           onClick={captureCameraPage}
-          disabled={!isCameraReady}
+          disabled={!isCameraReady || !livePageQuality?.isReadable || !!liveQrNifError}
           className={`flex-1 sm:flex-none px-8 py-4 rounded-2xl text-white font-black uppercase text-xs transition-all flex items-center justify-center gap-2 shadow-2xl ${
-            !isCameraReady ? 'bg-orange-500/40 cursor-not-allowed'
+            !isCameraReady || !livePageQuality?.isReadable || !!liveQrNifError ? 'bg-orange-500/40 cursor-not-allowed'
             : qrLiveDetected ? 'bg-emerald-500 hover:bg-emerald-400 scale-105'
             : 'bg-orange-500 hover:bg-orange-600'
           }`}
         >
           <Camera size={18} />
-          {!isCameraReady ? 'A preparar…' : qrLiveDetected ? 'Capturar — QR OK' : cameraIsMultiMode ? `Fotografar Parte ${capturedParts + 1}` : 'Fotografar'}
+          {!isCameraReady
+            ? 'A preparar…'
+            : !livePageQuality?.isReadable
+              ? 'Ajuste a fatura'
+              : qrLiveDetected
+                ? 'Capturar — QR OK'
+                : cameraIsMultiMode
+                  ? `Fotografar Parte ${capturedParts + 1}`
+                  : 'Fotografar'}
         </button>
       </div>
     </div>
@@ -790,7 +832,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                           setProcessingError(null);
                         }} className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"><X size={14} /></button>
                         <span className={`absolute left-2 bottom-2 px-2 py-1 rounded-lg text-[8px] font-black uppercase ${pageQualities[idx]?.isReadable ? 'bg-emerald-500 text-white' : 'bg-orange-500 text-white'}`}>
-                          {pageQualities[idx]?.isReadable ? 'Boa leitura' : 'Rever foto'}
+                          {pageQualities[idx]?.isReadable ? 'Boa para arquivo' : 'Rever foto'}
                         </span>
                      </div>
                    ))}
@@ -803,7 +845,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                       {pageQualities.every(q => q.isReadable) ? 'Imagem boa para leitura e arquivo digital' : 'Imagem pode não estar perfeita para leitura'}
                     </p>
                     <p className="text-[10px] font-bold opacity-70 mt-1">
-                      QR {qrPayloads.length > 0 ? 'lido' : 'não lido diretamente'} · Margens ajustadas automaticamente
+                      QR {qrPayloads.length > 0 ? 'lido' : 'não lido diretamente'} · Imagem original preservada
                     </p>
                   </div>
                 )}

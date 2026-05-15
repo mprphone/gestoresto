@@ -3,7 +3,11 @@ import { InvoiceExtractedData } from '../../geminiService';
 
 export interface PageQuality {
   sharpness: number;
+  sharpnessScore: number;
   brightness: number;
+  documentAreaRatio: number;
+  documentDetected: boolean;
+  qualityReasons: string[];
   isReadable: boolean;
   hasQrCode: boolean;
 }
@@ -108,7 +112,7 @@ export const analyzeCanvasQuality = (canvas: HTMLCanvasElement, hasQrCode = fals
   const x = Math.max(0, Math.floor((canvas.width - sampleWidth) / 2));
   const y = Math.max(0, Math.floor((canvas.height - sampleHeight) / 2));
   const data = ctx?.getImageData(x, y, sampleWidth, sampleHeight).data;
-  if (!data) return { sharpness: 0, brightness: 0, isReadable: false, hasQrCode };
+  if (!data) return { sharpness: 0, sharpnessScore: 0, brightness: 0, documentAreaRatio: 0, documentDetected: false, qualityReasons: ['Não foi possível avaliar a imagem'], isReadable: false, hasQrCode };
 
   let brightness = 0;
   let edge = 0;
@@ -128,10 +132,22 @@ export const analyzeCanvasQuality = (canvas: HTMLCanvasElement, hasQrCode = fals
   const pixels = gray.length || 1;
   const avgBrightness = brightness / pixels;
   const sharpness = edge / pixels;
+  const document = detectDocumentCrop(canvas);
+  const sharpnessScore = Math.min(100, Math.round(sharpness * 7));
+  const documentAreaRatio = document.areaRatio;
+  const documentDetected = document.areaRatio > 0;
+  const qualityReasons: string[] = [];
+  if (sharpnessScore < 70) qualityReasons.push('Foto desfocada');
+  if (documentAreaRatio < 0.4) qualityReasons.push('Aproxime a fatura');
+  if (!(avgBrightness > 15 && avgBrightness < 254)) qualityReasons.push('Luz inadequada');
   return {
     sharpness,
+    sharpnessScore,
     brightness: avgBrightness,
-    isReadable: avgBrightness > 15 && avgBrightness < 254,
+    documentAreaRatio,
+    documentDetected,
+    qualityReasons,
+    isReadable: qualityReasons.length === 0,
     hasQrCode
   };
 };
@@ -140,7 +156,7 @@ export const normalizeInvoiceImage = (base64: string): Promise<{ data: string; q
   return new Promise((resolve) => {
     const img = new Image();
     img.src = base64;
-    img.onerror = () => resolve({ data: base64.split(',')[1] || base64, quality: { sharpness: 0, brightness: 0, isReadable: false, hasQrCode: false }, width: 0, height: 0 });
+    img.onerror = () => resolve({ data: base64.split(',')[1] || base64, quality: { sharpness: 0, sharpnessScore: 0, brightness: 0, documentAreaRatio: 0, documentDetected: false, qualityReasons: ['Falha ao ler imagem'], isReadable: false, hasQrCode: false }, width: 0, height: 0 });
     img.onload = () => {
       const MAX_WIDTH = 2000;
       const scale = Math.min(1, MAX_WIDTH / img.width);
@@ -225,13 +241,14 @@ export interface CropProposal {
   sourceW: number;
   sourceH: number;
   confidence: number; // 0–1
+  areaRatio: number;
   reason: string;
 }
 
 export const detectDocumentCrop = (canvas: HTMLCanvasElement): CropProposal => {
   const W = canvas.width;
   const H = canvas.height;
-  const fallback: CropProposal = { cropX: 0, cropY: 0, cropW: W, cropH: H, sourceW: W, sourceH: H, confidence: 0, reason: 'fallback' };
+  const fallback: CropProposal = { cropX: 0, cropY: 0, cropW: W, cropH: H, sourceW: W, sourceH: H, confidence: 0, areaRatio: 0, reason: 'fallback' };
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx || W === 0 || H === 0) return fallback;
 
@@ -300,14 +317,14 @@ export const detectDocumentCrop = (canvas: HTMLCanvasElement): CropProposal => {
   const cropW = Math.min(W - cropX, dW + padX * 2);
   const cropH = Math.min(H - cropY, dH + padY * 2);
 
-  return { cropX, cropY, cropW, cropH, sourceW: W, sourceH: H, confidence, reason: notes.join('+') };
+  return { cropX, cropY, cropW, cropH, sourceW: W, sourceH: H, confidence, areaRatio, reason: notes.join('+') };
 };
 
 export const normalizeWithoutCrop = (base64: string): Promise<{ data: string; quality: PageQuality; width: number; height: number }> => {
   return new Promise((resolve) => {
     const img = new Image();
     img.src = base64;
-    img.onerror = () => resolve({ data: base64.split(',')[1] || base64, quality: { sharpness: 0, brightness: 0, isReadable: false, hasQrCode: false }, width: 0, height: 0 });
+    img.onerror = () => resolve({ data: base64.split(',')[1] || base64, quality: { sharpness: 0, sharpnessScore: 0, brightness: 0, documentAreaRatio: 0, documentDetected: false, qualityReasons: ['Falha ao ler imagem'], isReadable: false, hasQrCode: false }, width: 0, height: 0 });
     img.onload = () => {
       const MAX_WIDTH = 2000;
       const scale = Math.min(1, MAX_WIDTH / img.width);
