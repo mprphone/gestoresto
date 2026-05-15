@@ -102,7 +102,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   });
 
   const qualityErrorMessage = (quality: PageQuality) =>
-    `${quality.qualityReasons.join(' · ') || 'Foto sem qualidade suficiente'}. Nitidez ${quality.sharpnessScore}% · Documento ${Math.round(quality.documentAreaRatio * 100)}% da imagem.`;
+    `${quality.qualityReasons.join(' · ') || 'Foto sem qualidade suficiente'}. Nitidez ${quality.sharpnessScore}%.`;
 
   const prepareOcrPagesForAi = async (sourcePages: string[], forceDetailSlices = false) => {
     const ocrPages: string[] = [];
@@ -653,10 +653,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         </button>
       </div>
 
-      {/* Full-document guide — the invoice must fill the frame before capture is allowed. */}
+      {/* Adaptive guide: narrower for long receipts, wider for normal invoices. */}
       {isCameraReady && (
         <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center px-7 py-28">
-          <div className={`w-full max-w-sm h-full max-h-[70vh] rounded-3xl border-4 border-dashed transition-colors duration-300 ${
+          <div className={`w-full ${livePageQuality?.isLongReceipt ? 'max-w-[16rem]' : 'max-w-sm'} h-full max-h-[70vh] rounded-3xl border-4 border-dashed transition-all duration-300 ${
             livePageQuality?.isReadable ? 'border-emerald-400' : 'border-white/60'
           }`} />
         </div>
@@ -705,8 +705,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           qrLiveDetected ? 'top-40' : 'top-20'
         } ${livePageQuality.isReadable ? 'bg-emerald-500/95' : 'bg-orange-500/95'}`}>
           {livePageQuality.isReadable
-            ? `Boa para arquivo · Nitidez ${livePageQuality.sharpnessScore}% · Documento ${Math.round(livePageQuality.documentAreaRatio * 100)}%`
-            : `${livePageQuality.qualityReasons.join(' · ')} · Nitidez ${livePageQuality.sharpnessScore}% · Documento ${Math.round(livePageQuality.documentAreaRatio * 100)}%`}
+            ? `Boa para arquivo · ${livePageQuality.isLongReceipt ? 'Talão' : 'Documento'} enquadrado · Nitidez ${livePageQuality.sharpnessScore}%`
+            : `${livePageQuality.qualityReasons.join(' · ')} · Nitidez ${livePageQuality.sharpnessScore}%`}
         </div>
       )}
 
