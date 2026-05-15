@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import PDFDocument from 'pdfkit';
-import { query, withTransaction } from '../db.js';
+import { pool, query, withTransaction } from '../db.js';
 import { pageRange, pageResult } from '../pagination.js';
 import { audit } from '../audit.js';
 import { config } from '../config.js';
@@ -14,6 +14,11 @@ export const invoicesRouter = Router();
 
 function onlyDigits(value) {
   return String(value || '').replace(/\D/g, '');
+}
+
+function documentSerialTail(value) {
+  const match = String(value || '').match(/(\d+)\s*$/);
+  return match?.[1] || '';
 }
 
 function normalizeDocNumber(value) {
@@ -126,10 +131,41 @@ async function generateInvoicePdf({ invoice, payload, imageDocuments, outputPath
 }
 
 async function assertNotDuplicateInvoice(client, payload, restaurantId) {
+  const duplicate = await findDuplicateInvoice(client, payload, restaurantId);
+  if (duplicate) {
+    const error = new Error(duplicate.message);
+    error.statusCode = 409;
+    throw error;
+  }
+}
+
+async function findDuplicateInvoice(client, payload, restaurantId) {
   const supplierNif = onlyDigits(payload.supplierNif);
   const docNumber = normalizeDocNumber(payload.docNumber);
   const totalCents = toCents(payload.totalAmount);
   const dateIssued = payload.dateIssued || new Date().toISOString().slice(0, 10);
+  const qrCodeText = String(payload.qrCodeText || '').trim();
+  const atcud = String(payload.atcud || '').trim();
+
+  if (qrCodeText || atcud) {
+    const fiscalMatch = await client.query(`
+      select id, supplier_name, doc_number, total_amount, date_issued
+      from purchase_invoices
+      where restaurant_id = $3
+        and (
+          ($1 <> '' and qr_code_text = $1)
+          or ($2 <> '' and atcud = $2)
+        )
+      limit 1
+    `, [qrCodeText, atcud, restaurantId]);
+    if (fiscalMatch.rows[0]) {
+      return {
+        kind: 'fiscal',
+        invoice: fiscalMatch.rows[0],
+        message: `Fatura duplicada: ${fiscalMatch.rows[0].supplier_name} ${fiscalMatch.rows[0].doc_number} já foi registada.`
+      };
+    }
+  }
 
   if (supplierNif && docNumber) {
     const exact = await client.query(`
@@ -139,9 +175,32 @@ async function assertNotDuplicateInvoice(client, payload, restaurantId) {
       limit 1
     `, [supplierNif, docNumber, restaurantId]);
     if (exact.rows[0]) {
-      const error = new Error(`Fatura duplicada: ${exact.rows[0].supplier_name} ${exact.rows[0].doc_number} já foi registada.`);
-      error.statusCode = 409;
-      throw error;
+      return {
+        kind: 'exact',
+        invoice: exact.rows[0],
+        message: `Fatura duplicada: ${exact.rows[0].supplier_name} ${exact.rows[0].doc_number} já foi registada.`
+      };
+    }
+  }
+
+  const serialTail = documentSerialTail(payload.docNumber);
+  if (supplierNif && serialTail && totalCents !== null) {
+    const sameTail = await client.query(`
+      select id, supplier_name, doc_number, total_amount, date_issued
+      from purchase_invoices
+      where normalized_supplier_nif = $1
+        and restaurant_id = $3
+        and abs(round(total_amount * 100) - $2) <= 1
+      order by date_issued desc
+      limit 20
+    `, [supplierNif, totalCents, restaurantId]);
+    const invoice = sameTail.rows.find(row => documentSerialTail(row.doc_number) === serialTail);
+    if (invoice) {
+      return {
+        kind: 'same_serial_tail',
+        invoice,
+        message: `Possível fatura duplicada: já existe ${invoice.doc_number} com o mesmo fornecedor, total e número final ${serialTail}.`
+      };
     }
   }
 
@@ -157,11 +216,15 @@ async function assertNotDuplicateInvoice(client, payload, restaurantId) {
       limit 1
     `, [supplierNif, totalCents, dateIssued, restaurantId]);
     if (similar.rows[0]) {
-      const error = new Error(`Possível fatura duplicada: já existe ${similar.rows[0].doc_number} de ${similar.rows[0].date_issued} com o mesmo fornecedor e total.`);
-      error.statusCode = 409;
-      throw error;
+      return {
+        kind: 'similar',
+        invoice: similar.rows[0],
+        message: `Possível fatura duplicada: já existe ${similar.rows[0].doc_number} de ${similar.rows[0].date_issued} com o mesmo fornecedor e total.`
+      };
     }
   }
+
+  return null;
 }
 
 async function validateRestaurantCustomer(client, payload, restaurantId) {
@@ -280,6 +343,15 @@ invoicesRouter.get('/:id/lines', async (req, res, next) => {
       order by line_number asc
     `, [req.params.id, req.restaurantId]);
     res.json({ data: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+invoicesRouter.post('/check-duplicate', async (req, res, next) => {
+  try {
+    const duplicate = await findDuplicateInvoice(pool, req.body || {}, req.restaurantId);
+    res.json({ duplicate: Boolean(duplicate), ...(duplicate || {}) });
   } catch (error) {
     next(error);
   }

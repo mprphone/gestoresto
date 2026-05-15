@@ -6,6 +6,7 @@ import { processInvoiceImage, InvoiceExtractedData } from '../geminiService';
 import { Product, Category, Supplier, PurchaseInvoice, ProductAlias, StockEntryLineInput, RestaurantProfile } from '../types';
 import { analyzeCanvasQuality, normalizeWithoutCrop, PageQuality, PortugueseQrData, normalizePortugueseDocumentType, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads, validateInvoiceTotals } from './stock-entry/invoiceProcessor';
 import { buildProductMatches, confidenceStyle, normalizeNif } from './stock-entry/productMatcher';
+import { checkInvoiceDuplicate } from '../data/invoicesRepository';
 
 interface StockEntryProps {
   products: Product[];
@@ -34,6 +35,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [nif, setNif] = useState('');
   const [docNumber, setDocNumber] = useState('');
   const [isDuplicate, setIsDuplicate] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [cameraIsMultiMode, setCameraIsMultiMode] = useState(false);
@@ -60,6 +62,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     if (nif && docNumber) {
       const exists = invoices.some(inv => inv.docNumber.toLowerCase() === docNumber.toLowerCase() && inv.supplierNif === nif);
       setIsDuplicate(exists);
+      if (exists) setDuplicateWarning(`Este documento ${docNumber} já foi inserido anteriormente.`);
     }
   }, [nif, docNumber, invoices]);
 
@@ -72,6 +75,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
   const applyQrData = (qrText: string) => {
     const parsed = parsePortugueseQrData(qrText);
+    setIsDuplicate(false);
+    setDuplicateWarning(null);
     setQrData(parsed);
     if (parsed.supplierNif) {
       setNif(parsed.supplierNif);
@@ -80,6 +85,28 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     }
     if (parsed.documentNumber) setDocNumber(parsed.documentNumber);
     return parsed;
+  };
+
+  const checkQrDuplicate = async (parsed: PortugueseQrData) => {
+    try {
+      const result = await checkInvoiceDuplicate({
+        supplierNif: parsed.supplierNif,
+        docNumber: parsed.documentNumber,
+        totalAmount: parsed.totalAmount,
+        dateIssued: parsed.documentDate,
+        qrCodeText: parsed.rawText,
+        atcud: parsed.atcud
+      });
+      if (result.duplicate) {
+        setIsDuplicate(true);
+        setDuplicateWarning(result.message || 'Esta fatura já foi registada anteriormente.');
+        setCameraError(result.message || 'Esta fatura já foi registada anteriormente.');
+        return true;
+      }
+    } catch {
+      // The final save still performs the same server-side duplicate validation.
+    }
+    return false;
   };
 
   // Returns error message if buyer NIF in QR is invalid for this restaurant, null if OK
@@ -175,6 +202,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           if (qrText) {
             const parsedQr = applyQrData(qrText);
             setQrPayloads(prev => prev.includes(qrText) ? prev : [...prev, qrText]);
+            if (await checkQrDuplicate(parsedQr)) return;
             const nifErr = checkQrBuyerNif(parsedQr);
             if (nifErr) {
               setLiveQrNifError(nifErr);
@@ -427,6 +455,11 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       const firstQrPayload = updatedQrPayloads[0];
       if (firstQrPayload) {
         const parsedQr = applyQrData(firstQrPayload);
+        if (await checkQrDuplicate(parsedQr)) {
+          setProcessingError(duplicateWarning || 'Esta fatura já foi registada anteriormente.');
+          setIsProcessing(false);
+          return;
+        }
         const nifErr = checkQrBuyerNif(parsedQr);
         setNifMismatch(nifErr);
       }
@@ -475,6 +508,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     // NIF check immediately after capture — before calling Gemini
     if (updatedQrPayloads.length > 0) {
       const parsedQr = applyQrData(updatedQrPayloads[0]);
+      if (await checkQrDuplicate(parsedQr)) {
+        closeCamera();
+        return;
+      }
       const nifErr = checkQrBuyerNif(parsedQr);
       setNifMismatch(nifErr);
     } else {
@@ -520,6 +557,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setNif('');
     setDocNumber('');
     setIsDuplicate(false);
+    setDuplicateWarning(null);
     setProcessingError(null);
     setNifMismatch(null);
     setLiveQrNifError(null);
@@ -732,9 +770,9 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         )}
         <button
           onClick={captureCameraPage}
-          disabled={!isCameraReady || !livePageQuality?.isReadable || !!liveQrNifError}
+          disabled={!isCameraReady || !livePageQuality?.isReadable || !!liveQrNifError || isDuplicate}
           className={`flex-1 sm:flex-none px-8 py-4 rounded-2xl text-white font-black uppercase text-xs transition-all flex items-center justify-center gap-2 shadow-2xl ${
-            !isCameraReady || !livePageQuality?.isReadable || !!liveQrNifError ? 'bg-orange-500/40 cursor-not-allowed'
+            !isCameraReady || !livePageQuality?.isReadable || !!liveQrNifError || isDuplicate ? 'bg-orange-500/40 cursor-not-allowed'
             : qrLiveDetected ? 'bg-emerald-500 hover:bg-emerald-400 scale-105'
             : 'bg-orange-500 hover:bg-orange-600'
           }`}
@@ -742,6 +780,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           <Camera size={18} />
           {!isCameraReady
             ? 'A preparar…'
+            : isDuplicate
+              ? 'Fatura duplicada'
             : !livePageQuality?.isReadable
               ? 'Ajuste a fatura'
               : qrLiveDetected
@@ -868,7 +908,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                 )}
                 {isProcessing && <div className="flex items-center gap-3 p-4 bg-orange-50 rounded-2xl border border-orange-100 animate-pulse"><RefreshCcw className="animate-spin text-orange-500" size={20} /><p className="text-[10px] font-black text-orange-600 uppercase">Lendo Artigos...</p></div>}
              </div>
-             {extractedData && isDuplicate && <div className="bg-red-600 text-white p-6 rounded-[2.5rem] shadow-xl animate-bounce flex items-start gap-4"><Copy size={32} /><div><h5 className="font-black uppercase text-sm">Fatura Duplicada!</h5><p className="text-[10px] font-bold opacity-80 mt-1">Este Nº {docNumber} já foi inserido anteriormente.</p></div></div>}
+             {isDuplicate && <div className="bg-red-600 text-white p-6 rounded-[2.5rem] shadow-xl animate-bounce flex items-start gap-4"><Copy size={32} /><div><h5 className="font-black uppercase text-sm">Fatura Duplicada!</h5><p className="text-[10px] font-bold opacity-80 mt-1">{duplicateWarning || `Este Nº ${docNumber} já foi inserido anteriormente.`}</p></div></div>}
           </div>
 
           <div className="lg:col-span-8 space-y-6">

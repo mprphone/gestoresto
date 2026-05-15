@@ -86,3 +86,14 @@ export async function createInvoiceWithLines(payload: any): Promise<{ invoice: P
     archiveDocument: result.archiveDocument
   };
 }
+
+export async function checkInvoiceDuplicate(payload: {
+  supplierNif?: string;
+  docNumber?: string;
+  totalAmount?: number;
+  dateIssued?: string;
+  qrCodeText?: string;
+  atcud?: string;
+}): Promise<{ duplicate: boolean; kind?: string; message?: string; invoice?: any }> {
+  return apiPost('/api/invoices/check-duplicate', payload);
+}
