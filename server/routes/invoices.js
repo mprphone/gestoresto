@@ -240,6 +240,19 @@ function validateInvoiceTotals(payload) {
   };
 }
 
+function preferFiscalQrTotal(payload) {
+  const qrTotalCents = toCents(payload.qrTotalAmount);
+  if (qrTotalCents === null) return;
+  const ocrTotalCents = toCents(payload.totalAmount);
+  if (ocrTotalCents !== null && ocrTotalCents !== qrTotalCents) {
+    payload.complianceNotes = [
+      payload.complianceNotes,
+      `Total OCR ${(ocrTotalCents / 100).toFixed(2)} substituído pelo total fiscal do QR ${(qrTotalCents / 100).toFixed(2)}.`
+    ].filter(Boolean).join(' ');
+  }
+  payload.totalAmount = qrTotalCents / 100;
+}
+
 invoicesRouter.get('/', async (req, res, next) => {
   try {
     const { page, pageSize, limit, offset } = pageRange(req);
@@ -314,6 +327,7 @@ invoicesRouter.post('/', async (req, res, next) => {
     const payload = req.body;
     payload.documentType = payload.documentType || inferDocumentType(payload);
     const isCredit = isCreditNote(payload);
+    if (!isCredit) preferFiscalQrTotal(payload);
     // For credit notes, negate quantities and total so stock is reduced
     if (isCredit) {
       payload.totalAmount = -Math.abs(Number(payload.totalAmount || 0));
@@ -332,11 +346,6 @@ invoicesRouter.post('/', async (req, res, next) => {
     const saved = await withTransaction(async client => {
       const restaurantValidation = await validateRestaurantCustomer(client, payload, req.restaurantId);
       const totalValidation = validateInvoiceTotals(payload);
-      if (totalValidation.status === 'ALERTA') {
-        const error = new Error(totalValidation.notes || 'Os totais da fatura não correspondem.');
-        error.statusCode = 422;
-        throw error;
-      }
       await assertNotDuplicateInvoice(client, payload, req.restaurantId);
       let supplierId = payload.supplierId || null;
       if (!supplierId && payload.supplierNif) {
