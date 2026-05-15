@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { CheckCircle, Clock, RefreshCcw, FileText, AlertTriangle, Check, X, ChevronDown, ChevronUp } from 'lucide-react';
-import { PendingInvoice, listPendingInvoices, markReviewed, markUnreviewed } from '../data/reviewRepository';
-import { apiUrl } from '../data/apiClient';
+import { PendingInvoice, listPendingInvoices, markReviewed, markUnreviewed, updateReviewExpenseCategory } from '../data/reviewRepository';
+import { apiGet, apiUrl } from '../data/apiClient';
 import { AppUser } from '../types';
 
 interface InvoiceReviewProps {
@@ -17,6 +17,7 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
   const [marking, setMarking] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expenseCategories, setExpenseCategories] = useState<Array<{ id: string; name: string }>>([]);
 
   const load = async () => {
     setIsLoading(true);
@@ -35,7 +36,18 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
     load();
   }, [restaurantId]);
 
+  useEffect(() => {
+    apiGet<{ data: Array<{ id: string; name: string }> }>('/api/expense-categories')
+      .then(result => setExpenseCategories(result.data))
+      .catch(() => setExpenseCategories([]));
+  }, []);
+
   const handleMark = async (invoice: PendingInvoice) => {
+    if (!invoice.reviewed_at && invoice.line_count === 0 && !invoice.expense_category) {
+      setError('Classifique o tipo de despesa antes de marcar como revista.');
+      setExpandedId(invoice.id);
+      return;
+    }
     setMarking(prev => ({ ...prev, [invoice.id]: true }));
     try {
       if (invoice.reviewed_at) {
@@ -44,6 +56,18 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
         await markReviewed(invoice.id, currentUser.id);
       }
       if (!invoice.reviewed_at) onReviewed?.();
+      await load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setMarking(prev => ({ ...prev, [invoice.id]: false }));
+    }
+  };
+
+  const handleExpenseCategory = async (invoice: PendingInvoice, expenseCategory: string) => {
+    setMarking(prev => ({ ...prev, [invoice.id]: true }));
+    try {
+      await updateReviewExpenseCategory(invoice.id, expenseCategory || undefined);
       await load();
     } catch (e: any) {
       setError(e.message);
@@ -156,6 +180,11 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
                     <span className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-slate-50 text-slate-500">
                       {inv.line_count} artigo{inv.line_count !== 1 ? 's' : ''}
                     </span>
+                    {inv.line_count === 0 && (
+                      <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-lg ${inv.expense_category ? 'bg-purple-50 text-purple-600' : 'bg-orange-50 text-orange-600'}`}>
+                        {inv.expense_category || 'Despesa por classificar'}
+                      </span>
+                    )}
                     {inv.has_qr_code && (
                       <span className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600">
                         QR ✓
@@ -223,6 +252,22 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
                       </tr>
                     </tbody>
                   </table>
+                </div>
+              )}
+              {isExpanded && inv.line_count === 0 && (
+                <div className="border-t border-slate-100 bg-white p-4">
+                  <label className="block text-[10px] font-black uppercase text-slate-400 mb-2">Tipo de despesa</label>
+                  <select
+                    value={inv.expense_category || ''}
+                    onChange={event => handleExpenseCategory(inv, event.target.value)}
+                    disabled={isMarking}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold"
+                  >
+                    <option value="">Por classificar</option>
+                    {expenseCategories.map(category => (
+                      <option key={category.id} value={category.id}>{category.name}</option>
+                    ))}
+                  </select>
                 </div>
               )}
               {isExpanded && archiveUrl && (

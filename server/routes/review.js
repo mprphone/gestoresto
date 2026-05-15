@@ -10,7 +10,7 @@ reviewRouter.get('/pending', async (req, res, next) => {
       select
         pi.id, pi.doc_number, pi.supplier_name, pi.supplier_nif,
         pi.total_amount, pi.date_issued, pi.created_at,
-        pi.has_qr_code, pi.qr_code_text, pi.qr_total_amount, pi.total_validation_status,
+        pi.has_qr_code, pi.qr_code_text, pi.qr_total_amount, pi.total_validation_status, pi.expense_category,
         pi.ai_model, pi.ai_input_tokens, pi.ai_output_tokens, pi.ai_total_tokens, pi.ai_thinking_tokens, pi.ai_attempts,
         pi.reviewed_at, pi.reviewed_by,
         u.name as reviewed_by_name,
@@ -71,6 +71,22 @@ reviewRouter.post('/:id/unreviewed', async (req, res, next) => {
       [req.params.id, req.restaurantId]
     );
     res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+reviewRouter.post('/:id/expense-category', async (req, res, next) => {
+  try {
+    const category = String(req.body?.expenseCategory || '').trim() || null;
+    const result = await query(`
+      update purchase_invoices
+      set expense_category = $2
+      where id = $1 and restaurant_id = $3
+      returning id, expense_category
+    `, [req.params.id, category, req.restaurantId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Fatura não encontrada' });
+    res.json(result.rows[0]);
   } catch (err) {
     next(err);
   }

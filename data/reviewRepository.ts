@@ -11,6 +11,7 @@ export interface PendingInvoice {
   has_qr_code: boolean;
   qr_total_amount?: number;
   total_validation_status?: string;
+  expense_category?: string;
   ai_model?: string;
   ai_input_tokens?: number;
   ai_output_tokens?: number;
@@ -37,6 +38,10 @@ export async function markReviewed(id: string, userId: string): Promise<void> {
 
 export async function markUnreviewed(id: string): Promise<void> {
   await apiPost(`/api/review/${id}/unreviewed`, {});
+}
+
+export async function updateReviewExpenseCategory(id: string, expenseCategory?: string): Promise<void> {
+  await apiPost(`/api/review/${id}/expense-category`, { expenseCategory });
 }
 
 export async function subscribePush(subscription: PushSubscription, userId: string): Promise<void> {
