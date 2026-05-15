@@ -11,6 +11,7 @@ reviewRouter.get('/pending', async (req, res, next) => {
         pi.id, pi.doc_number, pi.supplier_name, pi.supplier_nif,
         pi.total_amount, pi.date_issued, pi.created_at,
         pi.has_qr_code, pi.qr_code_text, pi.qr_total_amount, pi.total_validation_status,
+        pi.ai_model, pi.ai_input_tokens, pi.ai_output_tokens, pi.ai_total_tokens, pi.ai_thinking_tokens, pi.ai_attempts,
         pi.reviewed_at, pi.reviewed_by,
         u.name as reviewed_by_name,
         count(pil.id)::int as line_count,

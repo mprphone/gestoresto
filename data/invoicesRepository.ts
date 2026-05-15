@@ -36,7 +36,13 @@ const invoiceFromDb = (row: any): PurchaseInvoice => ({
     calculatedLinesTotal: row.calculated_lines_total === null ? undefined : Number(row.calculated_lines_total),
     totalValidationStatus: row.total_validation_status || undefined,
     totalValidationNotes: row.total_validation_notes || undefined,
-    complianceNotes: row.compliance_notes || undefined
+    complianceNotes: row.compliance_notes || undefined,
+    aiModel: row.ai_model || undefined,
+    aiInputTokens: row.ai_input_tokens ?? undefined,
+    aiOutputTokens: row.ai_output_tokens ?? undefined,
+    aiTotalTokens: row.ai_total_tokens ?? undefined,
+    aiThinkingTokens: row.ai_thinking_tokens ?? undefined,
+    aiAttempts: row.ai_attempts ?? undefined
   }
 });
 

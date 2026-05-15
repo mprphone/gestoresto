@@ -93,6 +93,12 @@ export async function runMigrations() {
     `alter table products add column if not exists restaurant_id uuid`,
     `alter table suppliers add column if not exists restaurant_id uuid`,
     `alter table purchase_invoices add column if not exists restaurant_id uuid`,
+    `alter table purchase_invoices add column if not exists ai_model text`,
+    `alter table purchase_invoices add column if not exists ai_input_tokens integer`,
+    `alter table purchase_invoices add column if not exists ai_output_tokens integer`,
+    `alter table purchase_invoices add column if not exists ai_total_tokens integer`,
+    `alter table purchase_invoices add column if not exists ai_thinking_tokens integer`,
+    `alter table purchase_invoices add column if not exists ai_attempts integer`,
     `alter table movements add column if not exists restaurant_id uuid`,
     `alter table digital_archive_documents add column if not exists restaurant_id uuid`
   ]) {

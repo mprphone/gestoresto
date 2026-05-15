@@ -393,7 +393,7 @@ invoicesRouter.post('/', async (req, res, next) => {
           primary_archive_document_id, has_qr_code, has_atcud, atcud,
           image_quality_ok, is_missing_pages,
           qr_code_text, qr_total_amount, calculated_lines_total, total_validation_status, total_validation_notes,
-          compliance_notes, expense_category
+          compliance_notes, ai_model, ai_input_tokens, ai_output_tokens, ai_total_tokens, ai_thinking_tokens, ai_attempts, expense_category
         )
         values (
           $1,
@@ -401,7 +401,7 @@ invoicesRouter.post('/', async (req, res, next) => {
           $10, $11, coalesce($12, current_date), $13, coalesce($14::invoice_status, 'PENDENTE'::invoice_status), coalesce($15, 0), $16,
           $17, $18, $19, $20, $21, $22,
           $23, $24, $25, $26, $27,
-          $28, $29
+          $28, $29, $30, $31, $32, $33, $34, $35
         )
         returning *
       `, [
@@ -414,7 +414,14 @@ invoicesRouter.post('/', async (req, res, next) => {
         payload.primaryArchiveDocumentId, payload.hasQrCode, payload.hasAtcud, payload.atcud,
         payload.imageQualityOk, payload.isMissingPages,
         payload.qrCodeText, payload.qrTotalAmount, payload.calculatedLinesTotal, totalValidation.status, totalValidation.notes || null,
-        payload.complianceNotes, payload.expenseCategory || null
+        payload.complianceNotes,
+        payload.aiUsage?.model || null,
+        payload.aiUsage?.inputTokens ?? null,
+        payload.aiUsage?.outputTokens ?? null,
+        payload.aiUsage?.totalTokens ?? null,
+        payload.aiUsage?.thinkingTokens ?? null,
+        payload.aiUsage?.attempts ?? null,
+        payload.expenseCategory || null
       ]);
 
       if (!invoice.rows[0]) {

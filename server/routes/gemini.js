@@ -139,6 +139,7 @@ geminiRouter.post('/analyze-invoice', async (req, res, next) => {
     if (!text) return res.status(502).json({ error: 'Empty response from Gemini' });
 
     const parsed = JSON.parse(text);
+    const usage = response.usageMetadata || {};
     parsed.items = (parsed.items || []).map(item => ({
       ...item,
       quantity:   Number(item.quantity)   || 1,
@@ -146,6 +147,14 @@ geminiRouter.post('/analyze-invoice', async (req, res, next) => {
       totalPrice: Number(item.totalPrice) || 0,
       category:   item.category || 'Outros'
     }));
+    parsed.aiUsage = {
+      model: config.geminiModel,
+      inputTokens: Number(usage.promptTokenCount || 0),
+      outputTokens: Number(usage.candidatesTokenCount || 0),
+      totalTokens: Number(usage.totalTokenCount || 0),
+      thinkingTokens: Number(usage.thoughtsTokenCount || 0),
+      attempts: 1
+    };
 
     console.log(`[gemini] analyzed ${images.length} image(s), items=${parsed.items.length}, model=${config.geminiModel}, ms=${Date.now() - startedAt}`);
     res.json(parsed);

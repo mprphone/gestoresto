@@ -144,6 +144,12 @@ export interface InvoiceDigitalCompliance {
   totalValidationStatus?: 'VALIDO' | 'ALERTA' | 'NAO_VERIFICADO';
   totalValidationNotes?: string;
   confidenceScore?: number;
+  aiModel?: string;
+  aiInputTokens?: number;
+  aiOutputTokens?: number;
+  aiTotalTokens?: number;
+  aiThinkingTokens?: number;
+  aiAttempts?: number;
 }
 
 export interface PurchaseInvoiceLine {

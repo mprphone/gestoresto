@@ -298,6 +298,12 @@ create table if not exists purchase_invoices (
     check (total_validation_status in ('VALIDO','ALERTA','NAO_VERIFICADO')),
   total_validation_notes text,
   compliance_notes text,
+  ai_model text,
+  ai_input_tokens integer,
+  ai_output_tokens integer,
+  ai_total_tokens integer,
+  ai_thinking_tokens integer,
+  ai_attempts integer,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   check (paid_amount <= total_amount)
@@ -327,7 +333,13 @@ alter table purchase_invoices
   add column if not exists qr_total_amount numeric(14,2),
   add column if not exists calculated_lines_total numeric(14,2),
   add column if not exists total_validation_status text not null default 'NAO_VERIFICADO',
-  add column if not exists total_validation_notes text;
+  add column if not exists total_validation_notes text,
+  add column if not exists ai_model text,
+  add column if not exists ai_input_tokens integer,
+  add column if not exists ai_output_tokens integer,
+  add column if not exists ai_total_tokens integer,
+  add column if not exists ai_thinking_tokens integer,
+  add column if not exists ai_attempts integer;
 
 alter table purchase_invoices
   drop constraint if exists purchase_invoices_restaurant_match_status_check;

@@ -38,6 +38,14 @@ export interface InvoiceExtractedData {
     totalValidationNotes?: string;
     confidenceScore?: number;
   };
+  aiUsage?: {
+    model?: string;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    thinkingTokens?: number;
+    attempts?: number;
+  };
 }
 
 import { apiPost } from './data/apiClient';

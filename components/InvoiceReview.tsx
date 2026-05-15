@@ -171,6 +171,11 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
                         {isPdf ? 'PDF' : 'Foto'} ↗
                       </span>
                     )}
+                    {(inv.ai_input_tokens || inv.ai_output_tokens) && (
+                      <span className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-slate-50 text-slate-500">
+                        IA {inv.ai_input_tokens || 0} in · {inv.ai_output_tokens || 0} out
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -194,6 +199,32 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
               </div>
 
               {/* Expandable document preview */}
+              {isExpanded && (inv.ai_input_tokens || inv.ai_output_tokens || inv.ai_total_tokens) && (
+                <div className="border-t border-slate-100 bg-white p-4">
+                  <table className="w-full text-left text-[10px]">
+                    <thead className="text-slate-400 uppercase">
+                      <tr>
+                        <th className="pb-2 font-black">Modelo</th>
+                        <th className="pb-2 font-black">Leitura</th>
+                        <th className="pb-2 font-black">Escrita</th>
+                        <th className="pb-2 font-black">Pensamento</th>
+                        <th className="pb-2 font-black">Total</th>
+                        <th className="pb-2 font-black">Tentativas</th>
+                      </tr>
+                    </thead>
+                    <tbody className="font-bold text-slate-700">
+                      <tr>
+                        <td className="py-1">{inv.ai_model || '-'}</td>
+                        <td className="py-1">{inv.ai_input_tokens || 0}</td>
+                        <td className="py-1">{inv.ai_output_tokens || 0}</td>
+                        <td className="py-1">{inv.ai_thinking_tokens || 0}</td>
+                        <td className="py-1">{inv.ai_total_tokens || 0}</td>
+                        <td className="py-1">{inv.ai_attempts || 1}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
               {isExpanded && archiveUrl && (
                 <div className="border-t border-slate-100 bg-slate-50" style={{ height: '70vh' }}>
                   {isPdf ? (

@@ -294,7 +294,20 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       if ((!data || data.items.length === 0) && currentQrPayloads.length > 0) {
         const detailPages = await prepareOcrPagesForAi(currentPages, true);
         if (detailPages.length > currentPages.length) {
-          data = await processInvoiceImage(detailPages);
+          const detailData = await processInvoiceImage(detailPages);
+          if (detailData) {
+            const firstUsage = data?.aiUsage;
+            const secondUsage = detailData.aiUsage;
+            detailData.aiUsage = {
+              model: secondUsage?.model || firstUsage?.model,
+              inputTokens: (firstUsage?.inputTokens || 0) + (secondUsage?.inputTokens || 0),
+              outputTokens: (firstUsage?.outputTokens || 0) + (secondUsage?.outputTokens || 0),
+              totalTokens: (firstUsage?.totalTokens || 0) + (secondUsage?.totalTokens || 0),
+              thinkingTokens: (firstUsage?.thinkingTokens || 0) + (secondUsage?.thinkingTokens || 0),
+              attempts: (firstUsage?.attempts || (data ? 1 : 0)) + (secondUsage?.attempts || 1)
+            };
+          }
+          data = detailData;
         }
       }
       if (!data || data.items.length === 0) {
@@ -405,12 +418,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       if (firstQrPayload) {
         const parsedQr = applyQrData(firstQrPayload);
         const nifErr = checkQrBuyerNif(parsedQr);
-        if (nifErr) {
-          setNifMismatch(nifErr);
-          setIsProcessing(false);
-          return;
-        }
-        setNifMismatch(null);
+        setNifMismatch(nifErr);
       }
       await processAllPages(updatedOriginals, updatedQrPayloads);
     } catch (error) {
@@ -454,13 +462,10 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     if (updatedQrPayloads.length > 0) {
       const parsedQr = applyQrData(updatedQrPayloads[0]);
       const nifErr = checkQrBuyerNif(parsedQr);
-      if (nifErr) {
-        closeCamera();
-        setNifMismatch(nifErr);
-        return;
-      }
+      setNifMismatch(nifErr);
+    } else {
+      setNifMismatch(null);
     }
-    setNifMismatch(null);
 
     const isLong = normalized.width > 0 && (normalized.height / normalized.width) > 2.5;
     const newPartCount = capturedParts + 1;
@@ -488,7 +493,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
   const confirmEntry = async () => {
     if (isSubmitting) return;
-    if (extractedData && !isDuplicate && !nifMismatch) {
+    if (extractedData && !isDuplicate) {
       setIsSubmitting(true);
       const completeMapping = { ...mapping };
       const createdProducts = { ...autoCreatedProducts };
@@ -539,7 +544,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           calculatedLinesTotal: extractedData.calculatedLinesTotal ?? extractedData.digitalCompliance.calculatedLinesTotal,
           totalValidationStatus: extractedData.digitalCompliance.totalValidationStatus,
           totalValidationNotes: extractedData.digitalCompliance.totalValidationNotes,
-          digitalCompliance: extractedData.digitalCompliance
+          digitalCompliance: extractedData.digitalCompliance,
+          aiUsage: extractedData.aiUsage
         }, invoicePhotos));
       } finally {
         setIsSubmitting(false);
@@ -687,28 +693,12 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     ? normalizePortugueseDocumentType(qrData?.documentType, extractedData.documentType, qrData?.documentNumber, extractedData.invoiceNumber)
     : normalizePortugueseDocumentType(qrData?.documentType, qrData?.documentNumber);
   const isCreditDocument = currentDocumentType === 'NC';
-  const allItemsGreen = extractedData
-    ? extractedData.items.every((item, idx) => Boolean(mapping[idx]) && (matchConfidences[idx] || 0) >= 90)
-    : false;
-  const fiscalQrReady = Boolean(
-    extractedData &&
-    qrData &&
-    (qrData.totalAmount || extractedData.qrTotalAmount) &&
-    !extractedData.digitalCompliance?.isMissingPages
-  );
-  const validationAcceptableForAuto = Boolean(
-    extractedData?.digitalCompliance?.totalValidationStatus === 'VALIDO' ||
-    (fiscalQrReady && (extractedData?.digitalCompliance?.confidenceScore || 0) >= 70)
-  );
   const autoAcceptReady = Boolean(
     extractedData &&
-    fiscalQrReady &&
+    extractedData.items.length > 0 &&
     !isProcessing &&
     !isSubmitting &&
-    !isDuplicate &&
-    !nifMismatch &&
-    validationAcceptableForAuto &&
-    allItemsGreen
+    !isDuplicate
   );
 
   useEffect(() => {
@@ -955,7 +945,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                     </div>
                     <div className="sticky bottom-0 z-30 -mx-4 -mb-4 sm:mx-0 sm:mb-0 p-4 sm:p-0 bg-white/95 sm:bg-transparent backdrop-blur border-t sm:border-t pt-4 sm:pt-8 flex flex-col md:flex-row justify-between items-center gap-3 sm:gap-6">
                        <div className="hidden sm:block"><p className="text-[10px] font-black text-slate-400 uppercase">Total do Documento</p><p className="text-4xl font-black italic text-slate-900">€ {extractedData.totalInvoiceAmount.toFixed(2)}</p></div>
-                       <button onClick={confirmEntry} className={`w-full md:w-auto px-8 sm:px-12 py-4 sm:py-5 rounded-2xl sm:rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate || nifMismatch || isSubmitting ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : isCreditDocument ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-orange-500 text-white hover:bg-orange-600 sm:bg-slate-900 sm:hover:bg-orange-500'}`} disabled={!!(isDuplicate || nifMismatch || isSubmitting)}>
+                       <button onClick={confirmEntry} className={`w-full md:w-auto px-8 sm:px-12 py-4 sm:py-5 rounded-2xl sm:rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate || isSubmitting ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : isCreditDocument ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-orange-500 text-white hover:bg-orange-600 sm:bg-slate-900 sm:hover:bg-orange-500'}`} disabled={!!(isDuplicate || isSubmitting)}>
                          {isSubmitting ? 'A guardar automaticamente...' : isCreditDocument ? 'Confirmar Nota de Crédito' : 'Confirmar Entrada'} {isSubmitting ? <RefreshCcw size={18} className="inline ml-2 animate-spin" /> : <Check size={20} className="inline ml-2" />}
                        </button>
                     </div>

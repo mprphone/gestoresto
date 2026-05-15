@@ -383,6 +383,7 @@ const App: React.FC = () => {
       totalValidationStatus: invoiceData?.totalValidationStatus,
       totalValidationNotes: invoiceData?.totalValidationNotes,
       complianceNotes: invoiceData?.digitalCompliance?.complianceNotes,
+      aiUsage: invoiceData?.aiUsage,
       ocrJson: invoiceData,
       lines
       });
