@@ -40,8 +40,18 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
   const [qrNifMismatch, setQrNifMismatch] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const qualityMessage = (quality: PageQuality) =>
-    `${quality.qualityReasons.join(' · ') || 'Foto sem qualidade suficiente'}. Nitidez ${quality.sharpnessScore}%.`;
+  // Despesas só precisam de arquivo legível; ao contrário do stock, não extraímos linhas por IA.
+  const getExpenseQualityReasons = (quality: PageQuality) => {
+    const reasons = quality.qualityReasons.filter(reason => reason !== 'Foto desfocada');
+    if (quality.sharpnessScore < 30) reasons.unshift('Foto desfocada');
+    return reasons;
+  };
+  const isExpenseArchiveReadable = (quality: PageQuality | null | undefined) =>
+    Boolean(quality && getExpenseQualityReasons(quality).length === 0);
+  const qualityMessage = (quality: PageQuality) => {
+    const reasons = getExpenseQualityReasons(quality);
+    return `${reasons.join(' · ') || 'Foto sem qualidade suficiente'}. Nitidez ${quality.sharpnessScore}%.`;
+  };
 
   // ── Camera helpers ──────────────────────────────────────────
   const stopCamera = () => {
@@ -193,7 +203,7 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
     if (qrDocuments.length === 0) { setCameraError('Leia primeiro o QR fiscal da fatura.'); return; }
     if (qrNifMismatch) { setCameraError(qrNifMismatch); return; }
     if (duplicateWarning) { setCameraError(duplicateWarning); return; }
-    if (!normalized.quality.isReadable) { setCameraError(qualityMessage(normalized.quality)); return; }
+    if (!isExpenseArchiveReadable(normalized.quality)) { setCameraError(qualityMessage(normalized.quality)); return; }
     const archivePage = await cropDetectedDocumentForArchive(rawDataUrl);
     setCapturedImgs(prev => [...prev, archivePage]);
     setCapturedQualities(prev => [...prev, normalized.quality]);
@@ -212,7 +222,7 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
       const payloads = await scanQrPayloads([normalized.data]);
       if (!payloads[0]) { setError('Não consegui ler o QR fiscal desta imagem.'); return; }
       await Promise.all(payloads.map(applyQr));
-      if (!normalized.quality.isReadable) { setError(qualityMessage(normalized.quality)); return; }
+      if (!isExpenseArchiveReadable(normalized.quality)) { setError(qualityMessage(normalized.quality)); return; }
       const archivePage = await cropDetectedDocumentForArchive(dataUrl);
       setCapturedImgs(prev => [...prev, archivePage]);
       setCapturedQualities(prev => [...prev, normalized.quality]);
@@ -259,7 +269,7 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
           qrTotalAmount: qr.totalAmount,
           hasQrCode: true,
           hasAtcud: !!qr.atcud,
-          imageQualityOk: capturedQualities.every(quality => quality.isReadable),
+          imageQualityOk: capturedQualities.every(quality => isExpenseArchiveReadable(quality)),
           totalValidationStatus: 'NAO_VERIFICADO',
           lines: [],
         });
@@ -339,10 +349,10 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
       {liveQuality && !qrNifMismatch && !duplicateWarning && (
         <div className={`absolute left-4 right-4 z-10 p-3 rounded-2xl text-white text-[10px] font-black uppercase ${
           qrDetected ? 'top-40' : 'top-20'
-        } ${liveQuality.isReadable ? 'bg-emerald-500/90' : 'bg-orange-500/95'}`}>
-          {liveQuality.isReadable
+        } ${isExpenseArchiveReadable(liveQuality) ? 'bg-emerald-500/90' : 'bg-orange-500/95'}`}>
+          {isExpenseArchiveReadable(liveQuality)
             ? `Boa para arquivo · ${liveQuality.isLongReceipt ? 'Talão' : 'Documento'} enquadrado · Nitidez ${liveQuality.sharpnessScore}%`
-            : `${liveQuality.qualityReasons.join(' · ')} · Nitidez ${liveQuality.sharpnessScore}%`}
+            : `${getExpenseQualityReasons(liveQuality).join(' · ')} · Nitidez ${liveQuality.sharpnessScore}%`}
         </div>
       )}
 
@@ -359,9 +369,9 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
         <button onClick={closeCamera} className="px-5 py-4 rounded-2xl border border-white/10 text-white/80 font-black uppercase text-xs hover:bg-white/10">Cancelar</button>
         <button
           onClick={() => captureRef.current?.()}
-          disabled={!isCameraReady || !(qrDetected || qrReady) || !liveQuality?.isReadable || !!qrNifMismatch || !!duplicateWarning}
+          disabled={!isCameraReady || !(qrDetected || qrReady) || !isExpenseArchiveReadable(liveQuality) || !!qrNifMismatch || !!duplicateWarning}
           className={`flex-1 px-8 py-4 rounded-2xl text-white font-black uppercase text-xs flex items-center justify-center gap-2 shadow-2xl transition-all ${
-            !isCameraReady || !(qrDetected || qrReady) || !liveQuality?.isReadable || !!qrNifMismatch || !!duplicateWarning ? 'bg-orange-500/40 cursor-not-allowed'
+            !isCameraReady || !(qrDetected || qrReady) || !isExpenseArchiveReadable(liveQuality) || !!qrNifMismatch || !!duplicateWarning ? 'bg-orange-500/40 cursor-not-allowed'
             : qrDetected ? 'bg-emerald-500 hover:bg-emerald-400 scale-105'
             : 'bg-orange-500 hover:bg-orange-600'
           }`}
@@ -373,7 +383,7 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
               ? 'Fatura duplicada'
               : !(qrDetected || qrReady)
                 ? 'Leia o QR'
-                : !liveQuality?.isReadable
+                : !isExpenseArchiveReadable(liveQuality)
                   ? 'Ajuste a fatura'
                   : 'Fotografar — QR OK'}
         </button>

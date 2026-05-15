@@ -148,7 +148,9 @@ export const analyzeCanvasQuality = (canvas: HTMLCanvasElement, hasQrCode = fals
     ? documentWidthRatio >= 0.2 && documentHeightRatio >= 0.7
     : documentWidthRatio >= 0.42 && documentHeightRatio >= 0.42;
   const qualityReasons: string[] = [];
-  if (sharpnessScore < 70) qualityReasons.push('Foto desfocada');
+  // A métrica é deliberadamente conservadora em folhas claras; abaixo disto a imagem
+  // costuma estar mesmo fraca, mas acima já vale a pena deixar o pipeline tentar ler.
+  if (sharpnessScore < 45) qualityReasons.push('Foto desfocada');
   if (!framingOk) qualityReasons.push(documentDetected ? 'Ajuste o enquadramento' : 'Enquadre a fatura');
   if (!(avgBrightness > 15 && avgBrightness < 254)) qualityReasons.push('Luz inadequada');
   return {
