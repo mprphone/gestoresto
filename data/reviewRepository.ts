@@ -12,6 +12,7 @@ export interface PendingInvoice {
   qr_total_amount?: number;
   total_validation_status?: string;
   expense_category?: string;
+  is_missing_pages?: boolean;
   ai_model?: string;
   ai_input_tokens?: number;
   ai_output_tokens?: number;

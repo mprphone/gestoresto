@@ -126,6 +126,23 @@ export async function runMigrations() {
     on purchase_invoices (restaurant_id, supplier_nif, doc_number)
     where restaurant_id is not null
   `).catch(() => {});
+  await query(`
+    create unique index if not exists invoices_restaurant_normalized_supplier_doc_unique
+    on purchase_invoices (restaurant_id, normalized_supplier_nif, normalized_doc_number)
+    where restaurant_id is not null
+      and normalized_supplier_nif <> ''
+      and normalized_doc_number <> ''
+  `).catch(() => {});
+  await query(`
+    create unique index if not exists invoices_restaurant_qr_unique
+    on purchase_invoices (restaurant_id, qr_code_text)
+    where restaurant_id is not null and qr_code_text is not null and qr_code_text <> ''
+  `).catch(() => {});
+  await query(`
+    create unique index if not exists invoices_restaurant_atcud_unique
+    on purchase_invoices (restaurant_id, atcud)
+    where restaurant_id is not null and atcud is not null and atcud <> ''
+  `).catch(() => {});
 
   // ── 3. Add FK constraints if missing ───────────────────────────────────────
   const fkMigrations = [

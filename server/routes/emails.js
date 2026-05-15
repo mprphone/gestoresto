@@ -4,6 +4,29 @@ import { sendTrackedEmail } from '../emailService.js';
 
 export const emailsRouter = Router();
 
+async function assertRelatedEntityBelongsToRestaurant(client, table, id, restaurantId) {
+  if (!id) return;
+  if (table === 'purchase_invoices') {
+    const result = await client.query('select id from purchase_invoices where id = $1 and restaurant_id = $2', [id, restaurantId]);
+    if (result.rows[0]) return;
+  } else if (table === 'payments') {
+    const result = await client.query(`
+      select p.id
+      from payments p
+      join purchase_invoices pi on pi.id = p.invoice_id
+      where p.id = $1 and pi.restaurant_id = $2
+    `, [id, restaurantId]);
+    if (result.rows[0]) return;
+  } else {
+    const error = new Error('Tipo de entidade relacionada inválido.');
+    error.status = 400;
+    throw error;
+  }
+  const error = new Error('Entidade relacionada não pertence ao restaurante ativo.');
+  error.status = 403;
+  throw error;
+}
+
 emailsRouter.get('/', async (_req, res, next) => {
   try {
     const result = await query(`
@@ -27,13 +50,18 @@ emailsRouter.post('/send', async (req, res, next) => {
       return;
     }
 
-    const saved = await withTransaction(async client => sendTrackedEmail(client, req, {
-      recipient,
-      subject,
-      body,
-      relatedEntityTable,
-      relatedEntityId
-    }));
+    const saved = await withTransaction(async client => {
+      if (relatedEntityId) {
+        await assertRelatedEntityBelongsToRestaurant(client, relatedEntityTable, relatedEntityId, req.restaurantId);
+      }
+      return sendTrackedEmail(client, req, {
+        recipient,
+        subject,
+        body,
+        relatedEntityTable,
+        relatedEntityId
+      });
+    });
 
     res.status(saved.status === 'FALHOU' ? 502 : 201).json(saved);
   } catch (error) {

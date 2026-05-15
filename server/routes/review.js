@@ -10,7 +10,7 @@ reviewRouter.get('/pending', async (req, res, next) => {
       select
         pi.id, pi.doc_number, pi.supplier_name, pi.supplier_nif,
         pi.total_amount, pi.date_issued, pi.created_at,
-        pi.has_qr_code, pi.qr_code_text, pi.qr_total_amount, pi.total_validation_status, pi.expense_category,
+        pi.has_qr_code, pi.qr_code_text, pi.qr_total_amount, pi.total_validation_status, pi.expense_category, pi.is_missing_pages,
         pi.ai_model, pi.ai_input_tokens, pi.ai_output_tokens, pi.ai_total_tokens, pi.ai_thinking_tokens, pi.ai_attempts,
         pi.reviewed_at, pi.reviewed_by,
         u.name as reviewed_by_name,
@@ -49,6 +49,15 @@ reviewRouter.get('/pending', async (req, res, next) => {
 reviewRouter.post('/:id/reviewed', async (req, res, next) => {
   try {
     const { userId } = req.body;
+    const before = await query(`
+      select id, is_missing_pages
+      from purchase_invoices
+      where id = $1 and restaurant_id = $2
+    `, [req.params.id, req.restaurantId]);
+    if (!before.rows[0]) return res.status(404).json({ error: 'Fatura não encontrada' });
+    if (before.rows[0].is_missing_pages) {
+      return res.status(409).json({ error: 'A fatura tem páginas em falta e não pode ser aprovada.' });
+    }
     const result = await query(`
       update purchase_invoices
       set reviewed_at = now(), reviewed_by = $2
@@ -56,7 +65,6 @@ reviewRouter.post('/:id/reviewed', async (req, res, next) => {
       returning id, reviewed_at, reviewed_by
     `, [req.params.id, userId || null, req.restaurantId]);
 
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Fatura não encontrada' });
     res.json(result.rows[0]);
   } catch (err) {
     next(err);

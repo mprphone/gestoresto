@@ -75,7 +75,7 @@ app.use('/api/payments', requireRestaurantContext, paymentsRouter);
 app.use('/api/archive', archiveRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/reports', requireRestaurantContext, reportsRouter);
-app.use('/api/emails', emailsRouter);
+app.use('/api/emails', requireRestaurantContext, emailsRouter);
 app.use('/api/restaurant-profile', requireRestaurantContext, restaurantProfileRouter);
 app.use('/api/gemini', geminiRouter);
 app.use('/api/push', pushRouter);

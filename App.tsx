@@ -21,9 +21,7 @@ import SupplierManagement from './components/SupplierManagement';
 import PurchasesList from './components/PurchasesList';
 import EquivalencesManagement from './components/EquivalencesManagement';
 import SystemNotice from './components/SystemNotice';
-import RestaurantSettings from './components/RestaurantSettings';
 import LoginScreen from './components/LoginScreen';
-import EmployeesManagement from './components/EmployeesManagement';
 import InvoiceReview from './components/InvoiceReview';
 import Expenses from './components/Expenses';
 import CompanyAdmin from './components/CompanyAdmin';
@@ -70,7 +68,7 @@ const App: React.FC = () => {
   const [currentRestaurant, setCurrentRestaurant] = useState<Restaurant | null>(null);
   const [userRestaurants, setUserRestaurants] = useState<Restaurant[]>([]);
   const [restaurantsLoading, setRestaurantsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'restaurant' | 'employees' | 'review' | 'expenses' | 'companies'>('dash');
+  const [activeTab, setActiveTab] = useState<'dash' | 'inv' | 'entry' | 'move' | 'rep' | 'catalog' | 'suppliers' | 'finance' | 'equiv' | 'review' | 'expenses' | 'companies'>('dash');
   const [pendingReviewCount, setPendingReviewCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);

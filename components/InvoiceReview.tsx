@@ -194,6 +194,11 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
                         Verificar totais
                       </span>
                     )}
+                    {inv.is_missing_pages && (
+                      <span className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-red-50 text-red-600">
+                        Páginas em falta
+                      </span>
+                    )}
                     {archiveUrl && (
                       <span className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-slate-50 text-slate-400">
                         {isPdf ? 'PDF' : 'Foto'} ↗

@@ -329,6 +329,10 @@ invoicesRouter.get('/', async (req, res, next) => {
     const count = await query('select count(*) from purchase_invoices where restaurant_id = $1', [req.restaurantId]);
     res.json(pageResult(result.rows, count.rows[0].count, page, pageSize));
   } catch (error) {
+    if (error.code === '23505') {
+      error.statusCode = 409;
+      error.message = 'Fatura duplicada: já existe um documento fiscal igual neste restaurante.';
+    }
     next(error);
   }
 });

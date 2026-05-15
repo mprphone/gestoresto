@@ -1,20 +1,28 @@
 import { Router } from 'express';
 import { withTransaction, query } from '../db.js';
 import { audit } from '../audit.js';
+import { pageRange, pageResult } from '../pagination.js';
 
 export const paymentsRouter = Router();
 
 paymentsRouter.get('/', async (req, res, next) => {
   try {
+    const { page, pageSize, limit, offset } = pageRange(req);
     const result = await query(`
       select p.*
       from payments p
       join purchase_invoices pi on pi.id = p.invoice_id
       where pi.restaurant_id = $1
       order by p.date_paid desc, p.id desc
-      limit 500
+      limit $2 offset $3
+    `, [req.restaurantId, limit, offset]);
+    const count = await query(`
+      select count(*)
+      from payments p
+      join purchase_invoices pi on pi.id = p.invoice_id
+      where pi.restaurant_id = $1
     `, [req.restaurantId]);
-    res.json({ data: result.rows });
+    res.json(pageResult(result.rows, count.rows[0].count, page, pageSize));
   } catch (error) {
     next(error);
   }
@@ -52,6 +60,11 @@ paymentsRouter.post('/batch', async (req, res, next) => {
         const before = await client.query('select * from purchase_invoices where id = $1 and restaurant_id = $2 for update', [invoiceId, req.restaurantId]);
         const invoice = before.rows[0];
         if (!invoice || invoice.status === 'PAGO') continue;
+        if (invoice.is_missing_pages) {
+          const error = new Error(`A fatura ${invoice.doc_number || invoiceId} tem páginas em falta e não pode ser paga.`);
+          error.status = 409;
+          throw error;
+        }
 
         const due = Math.max(0, Number(invoice.total_amount) - Number(invoice.paid_amount || 0));
         const payThis = remaining === null ? due : Math.min(due, Math.max(0, remaining));

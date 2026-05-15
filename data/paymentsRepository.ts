@@ -1,5 +1,6 @@
 import { Payment } from '../types';
 import { apiGet, apiPost } from './apiClient';
+import { PageOptions, PageResult } from './pagination';
 
 const fromDb = (row: any): Payment => ({
   id: row.id,
@@ -14,8 +15,10 @@ const fromDb = (row: any): Payment => ({
   archiveDocumentId: row.archive_document_id || undefined
 });
 
-export async function listPayments(): Promise<Payment[]> {
-  const result = await apiGet<{ data: any[] }>('/api/payments');
+export async function listPayments(options?: PageOptions): Promise<Payment[]> {
+  const page = options?.page || 1;
+  const pageSize = options?.pageSize || 200;
+  const result = await apiGet<PageResult<any>>(`/api/payments?page=${page}&pageSize=${pageSize}`);
   return result.data.map(fromDb);
 }
 
