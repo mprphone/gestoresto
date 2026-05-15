@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Camera, Upload, Check, RefreshCcw, X, QrCode } from 'lucide-react';
 import { apiPost, apiPostForm } from '../data/apiClient';
 import { RestaurantProfile } from '../types';
-import { analyzeCanvasQuality, normalizeWithoutCrop, PageQuality, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads } from './stock-entry/invoiceProcessor';
+import { analyzeCanvasQuality, cropDetectedDocumentForArchive, normalizeWithoutCrop, PageQuality, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads } from './stock-entry/invoiceProcessor';
 import { checkInvoiceDuplicate } from '../data/invoicesRepository';
 
 interface ExpensesProps {
@@ -30,9 +30,9 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
   const [date,        setDate]        = useState(new Date().toISOString().split('T')[0]);
   const [atcud,       setAtcud]       = useState('');
   const [qrText,      setQrText]      = useState('');
-  const [capturedImg, setCapturedImg] = useState<string | null>(null); // base64
+  const [capturedImgs, setCapturedImgs] = useState<string[]>([]); // cropped archive pages
   const [liveQuality, setLiveQuality] = useState<PageQuality | null>(null);
-  const [capturedQuality, setCapturedQuality] = useState<PageQuality | null>(null);
+  const [capturedQualities, setCapturedQualities] = useState<PageQuality[]>([]);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
 
   const [isSaving,      setIsSaving]      = useState(false);
@@ -196,8 +196,9 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
     if (qrNifMismatch) { setCameraError(qrNifMismatch); return; }
     if (duplicateWarning) { setCameraError(duplicateWarning); return; }
     if (!normalized.quality.isReadable) { setCameraError(qualityMessage(normalized.quality)); return; }
-    setCapturedImg(normalized.data);
-    setCapturedQuality(normalized.quality);
+    const archivePage = await cropDetectedDocumentForArchive(rawDataUrl);
+    setCapturedImgs(prev => [...prev, archivePage]);
+    setCapturedQualities(prev => [...prev, normalized.quality]);
     closeCamera();
   };
   useEffect(() => { captureRef.current = capture; });
@@ -214,15 +215,16 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
       if (!payloads[0]) { setError('Não consegui ler o QR fiscal desta imagem.'); return; }
       await applyQr(payloads[0]);
       if (!normalized.quality.isReadable) { setError(qualityMessage(normalized.quality)); return; }
-      setCapturedImg(normalized.data);
-      setCapturedQuality(normalized.quality);
+      const archivePage = await cropDetectedDocumentForArchive(dataUrl);
+      setCapturedImgs(prev => [...prev, archivePage]);
+      setCapturedQualities(prev => [...prev, normalized.quality]);
     };
     reader.readAsDataURL(file);
   };
 
   // ── Save ────────────────────────────────────────────────────
   const handleSave = async () => {
-    if (!capturedImg) { setError('Fotografe a fatura.'); return; }
+    if (capturedImgs.length === 0) { setError('Fotografe a fatura.'); return; }
     if (!qrText) { setError('Leia o QR fiscal da fatura.'); return; }
     if (qrNifMismatch) { setError(qrNifMismatch); return; }
     if (duplicateWarning) { setError(duplicateWarning); return; }
@@ -230,14 +232,14 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
     setIsSaving(true);
     try {
       const parsedQr = parsePortugueseQrData(qrText);
-      let archiveDocumentId: string | undefined;
-      if (capturedImg) {
-        const blob = await (await fetch(`data:image/jpeg;base64,${capturedImg}`)).blob();
+      const archiveDocumentIds: string[] = [];
+      for (const [index, image] of capturedImgs.entries()) {
+        const blob = await (await fetch(`data:image/jpeg;base64,${image}`)).blob();
         const form = new FormData();
-        form.append('file', blob, `despesa-${Date.now()}.jpg`);
+        form.append('file', blob, `despesa-${Date.now()}-pag-${index + 1}.jpg`);
         form.append('documentType', 'OUTRO');
         const uploaded = await apiPostForm<{ id: string }>('/api/archive/upload', form);
-        archiveDocumentId = uploaded.id;
+        archiveDocumentIds.push(uploaded.id);
       }
       await apiPost('/api/invoices', {
         supplierName: supplier.trim(),
@@ -249,21 +251,22 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
         dateIssued: date,
         expenseCategory: undefined,
         notes: 'Despesa por classificar - pendente de revisão do gerente.',
-        archiveDocumentId,
+        archiveDocumentId: archiveDocumentIds[0],
+        archiveDocumentIds,
         atcud: atcud || undefined,
         qrCodeText: qrText || undefined,
         qrTotalAmount: parsedQr.totalAmount,
         hasQrCode: !!qrText,
         hasAtcud: !!atcud,
-        imageQualityOk: capturedQuality?.isReadable,
+        imageQualityOk: capturedQualities.every(quality => quality.isReadable),
         totalValidationStatus: 'NAO_VERIFICADO',
         lines: [],
       });
       setSaved(true);
       setSupplier(''); setNif(''); setDocNumber('');
       setAmount(''); setAtcud(''); setQrText('');
-      setCapturedImg(null);
-      setCapturedQuality(null);
+      setCapturedImgs([]);
+      setCapturedQualities([]);
       setDuplicateWarning(null);
       setDate(new Date().toISOString().split('T')[0]);
       setTimeout(() => setSaved(false), 3000);
@@ -275,14 +278,10 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
     }
   };
 
-  const hasCaptured = !!capturedImg;
+  const hasCaptured = capturedImgs.length > 0;
   const qrReady     = !!qrText;
 
-  useEffect(() => {
-    if (capturedImg && qrReady && !qrNifMismatch && !duplicateWarning && !isSaving && !saved) {
-      handleSave();
-    }
-  }, [capturedImg, qrReady, qrNifMismatch, duplicateWarning]);
+  // A despesa pode ter várias páginas; só gravamos quando o funcionário concluir o arquivo.
 
   // ── Camera overlay ─────────────────────────────────────────
   const overlay = isCameraOpen ? createPortal(
@@ -358,9 +357,9 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
         <button onClick={closeCamera} className="px-5 py-4 rounded-2xl border border-white/10 text-white/80 font-black uppercase text-xs hover:bg-white/10">Cancelar</button>
         <button
           onClick={() => captureRef.current?.()}
-          disabled={!isCameraReady || !qrDetected || !liveQuality?.isReadable || !!qrNifMismatch || !!duplicateWarning}
+          disabled={!isCameraReady || !(qrDetected || qrReady) || !liveQuality?.isReadable || !!qrNifMismatch || !!duplicateWarning}
           className={`flex-1 px-8 py-4 rounded-2xl text-white font-black uppercase text-xs flex items-center justify-center gap-2 shadow-2xl transition-all ${
-            !isCameraReady || !qrDetected || !liveQuality?.isReadable || !!qrNifMismatch || !!duplicateWarning ? 'bg-orange-500/40 cursor-not-allowed'
+            !isCameraReady || !(qrDetected || qrReady) || !liveQuality?.isReadable || !!qrNifMismatch || !!duplicateWarning ? 'bg-orange-500/40 cursor-not-allowed'
             : qrDetected ? 'bg-emerald-500 hover:bg-emerald-400 scale-105'
             : 'bg-orange-500 hover:bg-orange-600'
           }`}
@@ -370,7 +369,7 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
             ? 'A preparar…'
             : duplicateWarning
               ? 'Fatura duplicada'
-              : !qrDetected
+              : !(qrDetected || qrReady)
                 ? 'Leia o QR'
                 : !liveQuality?.isReadable
                   ? 'Ajuste a fatura'
@@ -395,11 +394,22 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
 
         {hasCaptured ? (
           <div className="space-y-3">
-            <div className="relative rounded-2xl overflow-hidden border border-slate-200 aspect-video bg-slate-50">
-              <img src={`data:image/jpeg;base64,${capturedImg}`} className="w-full h-full object-contain" />
-              <button onClick={() => { setCapturedImg(null); setCapturedQuality(null); setQrText(''); setNif(''); setDocNumber(''); setAmount(''); setAtcud(''); }}
-                className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg">
-                <X size={14} />
+            <div className="grid grid-cols-2 gap-3">
+              {capturedImgs.map((image, index) => (
+                <div key={index} className="relative rounded-2xl overflow-hidden border border-slate-200 aspect-[3/4] bg-slate-50">
+                  <img src={`data:image/jpeg;base64,${image}`} className="w-full h-full object-contain" />
+                  <button onClick={() => {
+                    setCapturedImgs(prev => prev.filter((_, page) => page !== index));
+                    setCapturedQualities(prev => prev.filter((_, page) => page !== index));
+                  }} className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg">
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+              <button onClick={openCamera}
+                className="aspect-[3/4] rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 hover:border-orange-300 hover:text-orange-400 transition-all">
+                <Camera size={24} />
+                <span className="text-[9px] font-black uppercase mt-2">Adicionar página</span>
               </button>
             </div>
             {qrReady && (
@@ -463,6 +473,12 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
         <div className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-sm shadow-2xl flex items-center justify-center gap-3">
           <RefreshCcw size={18} className="animate-spin" /> A Registar…
         </div>
+      )}
+      {hasCaptured && !isSaving && !saved && (
+        <button onClick={handleSave}
+          className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-sm shadow-2xl hover:bg-orange-500 transition-all flex items-center justify-center gap-3">
+          <Check size={18} /> Concluir arquivo ({capturedImgs.length} {capturedImgs.length === 1 ? 'página' : 'páginas'})
+        </button>
       )}
 
       {overlay}

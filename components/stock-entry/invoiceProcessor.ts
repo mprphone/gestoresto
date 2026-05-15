@@ -368,6 +368,32 @@ export const normalizeWithoutCrop = (base64: string): Promise<{ data: string; qu
   });
 };
 
+export const cropDetectedDocumentForArchive = (base64: string): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`;
+    img.onerror = () => resolve(base64.split(',')[1] || base64);
+    img.onload = () => {
+      const source = document.createElement('canvas');
+      source.width = img.naturalWidth || img.width;
+      source.height = img.naturalHeight || img.height;
+      const sourceCtx = source.getContext('2d');
+      sourceCtx?.drawImage(img, 0, 0);
+      const crop = detectDocumentCrop(source);
+      const shouldCrop = crop.confidence >= 0.5 && crop.widthRatio > 0.15 && crop.heightRatio > 0.15;
+      if (!shouldCrop) {
+        resolve(source.toDataURL('image/jpeg', 0.92).split(',')[1]);
+        return;
+      }
+      const out = document.createElement('canvas');
+      out.width = crop.cropW;
+      out.height = crop.cropH;
+      out.getContext('2d')?.drawImage(source, crop.cropX, crop.cropY, crop.cropW, crop.cropH, 0, 0, crop.cropW, crop.cropH);
+      resolve(out.toDataURL('image/jpeg', 0.92).split(',')[1]);
+    };
+  });
+};
+
 export const scanQrPayloads = async (base64Pages: string[]) => {
   const BarcodeDetectorCtor = (window as any).BarcodeDetector;
 
