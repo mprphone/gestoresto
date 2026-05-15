@@ -14,7 +14,7 @@ interface StockEntryProps {
   productAliases: ProductAlias[];
   categories: Category[];
   restaurantProfile?: RestaurantProfile | null;
-  onComplete: (items: StockEntryLineInput[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any, photoUrls?: string[]) => void | Promise<void>;
+  onComplete: (items: StockEntryLineInput[], photoUrl?: string, supplierData?: Partial<Supplier>, invoiceData?: any, photoUrls?: string[]) => boolean | void | Promise<boolean | void>;
   onQuickCreateProduct: (data: any) => Product | Promise<Product>;
 }
 
@@ -491,6 +491,30 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     await processAllPages(currentPages, currentQrPayloads);
   };
 
+  const resetEntry = () => {
+    setPages([]);
+    setOriginalPages([]);
+    setExtractedData(null);
+    setMapping({});
+    setMatchConfidences({});
+    setAliasMapping({});
+    setItemFamilies({});
+    setUnitOriginals({});
+    setConversionFactors({});
+    setAutoCreatedProducts({});
+    setSupplier('');
+    setNif('');
+    setDocNumber('');
+    setIsDuplicate(false);
+    setProcessingError(null);
+    setNifMismatch(null);
+    setLiveQrNifError(null);
+    setQrPayloads([]);
+    setQrData(null);
+    setPageQualities([]);
+    autoSubmitRef.current = false;
+  };
+
   const confirmEntry = async () => {
     if (isSubmitting) return;
     if (extractedData && !isDuplicate) {
@@ -532,7 +556,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         const sourcePages = originalPages.length > 0 ? originalPages : pages.map(page => `data:image/jpeg;base64,${page}`);
         const invoicePhotos = sourcePages.map(page => page.startsWith('data:') ? page : `data:image/jpeg;base64,${page}`);
         const documentType = normalizePortugueseDocumentType(qrData?.documentType, extractedData.documentType, qrData?.documentNumber, extractedData.invoiceNumber);
-        await Promise.resolve(onComplete(itemsToSubmit, invoicePhotos[0], { name: supplier, nif }, {
+        const saved = await Promise.resolve(onComplete(itemsToSubmit, invoicePhotos[0], { name: supplier, nif }, {
           docNumber,
           documentType,
           dateIssued: qrData?.documentDate,
@@ -547,6 +571,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
           digitalCompliance: extractedData.digitalCompliance,
           aiUsage: extractedData.aiUsage
         }, invoicePhotos));
+        if (saved !== false) resetEntry();
       } finally {
         setIsSubmitting(false);
       }

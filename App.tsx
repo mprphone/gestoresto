@@ -93,8 +93,10 @@ const App: React.FC = () => {
     try {
       await work();
       if (successMessage) setNotice({ type: 'success', message: successMessage });
+      return true;
     } catch (error: any) {
       setNotice({ type: 'error', message: error.message || 'Operação falhou. Os dados anteriores foram preservados.' });
+      return false;
     }
   };
 
@@ -356,7 +358,7 @@ const App: React.FC = () => {
       };
     });
 
-    await runAction(async () => {
+    return runAction(async () => {
       await createInvoiceWithLines({
       supplierName: supplierData?.name || 'Fornecedor',
       supplierNif,
@@ -388,7 +390,6 @@ const App: React.FC = () => {
       lines
       });
       await refreshData();
-      setActiveTab('inv');
     }, 'Fatura guardada com arquivo, linhas e stock atualizados.');
   };
 
