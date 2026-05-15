@@ -1,48 +1,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import {
-  Zap, Droplets, Flame, Wifi, Shield, Home, Calculator, MoreHorizontal,
-  Camera, Upload, Check, RefreshCcw, X, Euro, QrCode, Pencil
-} from 'lucide-react';
-import { apiPost, apiPostForm, apiGet } from '../data/apiClient';
+import { Camera, Upload, Check, RefreshCcw, X, QrCode } from 'lucide-react';
+import { apiPost, apiPostForm } from '../data/apiClient';
 import { RestaurantProfile } from '../types';
-
-const CATEGORY_UI: Record<string, { icon: React.ElementType; color: string }> = {
-  'Eletricidade':     { icon: Zap,             color: 'bg-yellow-50 text-yellow-600 border-yellow-200' },
-  'Água':             { icon: Droplets,        color: 'bg-blue-50 text-blue-600 border-blue-200' },
-  'Gás':              { icon: Flame,           color: 'bg-orange-50 text-orange-600 border-orange-200' },
-  'Telecomunicações': { icon: Wifi,            color: 'bg-indigo-50 text-indigo-600 border-indigo-200' },
-  'Seguros':          { icon: Shield,          color: 'bg-teal-50 text-teal-600 border-teal-200' },
-  'Rendas':           { icon: Home,            color: 'bg-slate-100 text-slate-600 border-slate-200' },
-  'Contabilidade':    { icon: Calculator,      color: 'bg-purple-50 text-purple-600 border-purple-200' },
-  'Outros':           { icon: MoreHorizontal,  color: 'bg-slate-50 text-slate-500 border-slate-200' },
-};
-
-// Parse Portuguese AT QR code fields (A:NIF B:NIF-cliente D:tipo F:data G:nº-doc H:ATCUD O:total)
-function parseATQR(text: string) {
-  const fields: Record<string, string> = {};
-  text.split('*').forEach(part => {
-    const colon = part.indexOf(':');
-    if (colon > 0) fields[part.slice(0, colon)] = part.slice(colon + 1);
-  });
-  const rawDate = fields['F'] || '';
-  const date = rawDate.length === 8
-    ? `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}`
-    : new Date().toISOString().split('T')[0];
-  const raw = fields['G'] || '';
-  const docNumber = raw.includes(' ') ? raw.split(' ').slice(1).join(' ') : raw;
-  return {
-    supplierNif: fields['A'] || '',
-    customerNif: fields['B'] || '',
-    docNumber,
-    atcud: fields['H'] || '',
-    totalAmount: fields['O'] ? Number(fields['O'].replace(',', '.')) : undefined,
-    date,
-    hasQrCode: true,
-    qrCodeText: text,
-  };
-}
+import { analyzeCanvasQuality, normalizeWithoutCrop, PageQuality, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads } from './stock-entry/invoiceProcessor';
+import { checkInvoiceDuplicate } from '../data/invoicesRepository';
 
 interface ExpensesProps {
   onSaved?: () => void;
@@ -58,26 +21,19 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
   const [viewportHeight, setViewportHeight] = useState(720);
   const videoRef        = useRef<HTMLVideoElement>(null);
   const streamRef       = useRef<MediaStream | null>(null);
-  const captureRef      = useRef<() => void>();
+  const captureRef      = useRef<() => Promise<void>>();
 
-  // Form state
-  const [expenseCategories, setExpenseCategories] = useState<{id: string; name: string}[]>([]);
-  useEffect(() => {
-    apiGet<{data: {id: string; name: string}[]}>('/api/expense-categories')
-      .then(r => setExpenseCategories(r.data))
-      .catch(() => setExpenseCategories(Object.entries(CATEGORY_UI).map(([id]) => ({ id, name: id }))));
-  }, []);
-
-  const [category,    setCategory]    = useState('');
   const [supplier,    setSupplier]    = useState('');
   const [nif,         setNif]         = useState('');
   const [docNumber,   setDocNumber]   = useState('');
   const [amount,      setAmount]      = useState('');
   const [date,        setDate]        = useState(new Date().toISOString().split('T')[0]);
-  const [notes,       setNotes]       = useState('');
   const [atcud,       setAtcud]       = useState('');
   const [qrText,      setQrText]      = useState('');
   const [capturedImg, setCapturedImg] = useState<string | null>(null); // base64
+  const [liveQuality, setLiveQuality] = useState<PageQuality | null>(null);
+  const [capturedQuality, setCapturedQuality] = useState<PageQuality | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
 
   const [isSaving,      setIsSaving]      = useState(false);
   const [saved,         setSaved]         = useState(false);
@@ -85,6 +41,8 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
   const [qrNifMismatch, setQrNifMismatch] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const qualityMessage = (quality: PageQuality) =>
+    `${quality.qualityReasons.join(' · ') || 'Foto sem qualidade suficiente'}. Nitidez ${quality.sharpnessScore}%.`;
 
   // ── Camera helpers ──────────────────────────────────────────
   const stopCamera = () => {
@@ -99,6 +57,7 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
     setIsCameraReady(false);
     setQrDetected(false);
     setCameraError(null);
+    setLiveQuality(null);
   };
 
   const openCamera = async () => {
@@ -145,38 +104,75 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
     };
   }, [isCameraOpen]);
 
-  // Live QR scan — latch on first detection
+  const applyQr = async (rawText: string) => {
+    const parsed = parsePortugueseQrData(rawText);
+    setNif(parsed.supplierNif || '');
+    setDocNumber(parsed.documentNumber || '');
+    setAtcud(parsed.atcud || '');
+    setQrText(parsed.rawText);
+    if (parsed.totalAmount) setAmount(String(parsed.totalAmount));
+    if (parsed.documentDate) setDate(parsed.documentDate);
+    setSupplier(parsed.supplierNif ? `Fornecedor NIF ${parsed.supplierNif}` : 'Fornecedor por rever');
+
+    const restNif = String(restaurantProfile?.nif || '').replace(/\D/g, '');
+    const buyerNif = String(parsed.customerNif || '').replace(/\D/g, '');
+    if (!buyerNif && restNif) {
+      setQrNifMismatch(`O QR não tem NIF da empresa. NIF esperado: ${restNif}.`);
+    } else if (buyerNif === '999999990') {
+      setQrNifMismatch(`Fatura para consumidor final. NIF esperado: ${restNif || 'NIF da empresa'}.`);
+    } else if (restNif && buyerNif !== restNif) {
+      setQrNifMismatch(`Fatura emitida para NIF ${buyerNif}, mas o restaurante tem NIF ${restNif}.`);
+    } else {
+      setQrNifMismatch(null);
+    }
+
+    const duplicate = await checkInvoiceDuplicate({
+      supplierNif: parsed.supplierNif,
+      docNumber: parsed.documentNumber,
+      totalAmount: parsed.totalAmount,
+      dateIssued: parsed.documentDate,
+      qrCodeText: parsed.rawText,
+      atcud: parsed.atcud
+    }).catch(() => null);
+    if (duplicate?.duplicate) setDuplicateWarning(duplicate.message || 'Esta fatura já foi registada.');
+    else setDuplicateWarning(null);
+    return parsed;
+  };
+
+  // Live QR + quality scan
   useEffect(() => {
-    if (!isCameraReady || !isCameraOpen || qrDetected) return;
+    if (!isCameraReady || !isCameraOpen) return;
     const BDC = (window as any).BarcodeDetector;
-    if (!BDC) return;
-    const detector = new BDC({ formats: ['qr_code'] });
+    const detector = BDC ? new BDC({ formats: ['qr_code'] }) : null;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     let active = true;
     const scan = async () => {
       if (!active) return;
       const video = videoRef.current;
       if (video && video.readyState >= 2) {
         try {
-          const codes = await detector.detect(video);
-          if (codes.length > 0 && codes[0]?.rawValue) {
-            if (!active) return;
-            const parsed = parseATQR(codes[0].rawValue);
-            setNif(parsed.supplierNif);
-            setDocNumber(parsed.docNumber);
-            setAtcud(parsed.atcud);
-            setQrText(parsed.qrCodeText);
-            if (parsed.totalAmount) setAmount(String(parsed.totalAmount));
-            setDate(parsed.date);
-            setQrDetected(true);
-            // NIF mismatch check
-            const restNif = String(restaurantProfile?.nif || '').replace(/\D/g, '');
-            const buyerNif = parsed.customerNif.replace(/\D/g, '');
-            if (restNif && buyerNif && buyerNif !== restNif) {
-              setQrNifMismatch(`Fatura emitida para NIF ${buyerNif}, mas o restaurante tem NIF ${restNif}. Esta fatura pode não ser dedutível.`);
-            } else {
-              setQrNifMismatch(null);
+          let rawValue: string | undefined;
+          if (detector) {
+            const codes = await detector.detect(video);
+            rawValue = codes[0]?.rawValue;
+          }
+          if (ctx) {
+            const sw = video.videoWidth || 0;
+            const sh = video.videoHeight || 0;
+            if (sw > 0 && sh > 0) {
+              const scanWidth = Math.min(720, sw);
+              canvas.width = scanWidth;
+              canvas.height = Math.round(scanWidth * (sh / sw));
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              setLiveQuality(analyzeCanvasQuality(canvas));
+              rawValue ||= scanQrFromCanvas(canvas);
             }
-            return;
+          }
+          if (rawValue && !qrDetected) {
+            if (!active) return;
+            await applyQr(rawValue);
+            setQrDetected(true);
           }
         } catch {}
       }
@@ -184,42 +180,56 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
     };
     scan();
     return () => { active = false; };
-  }, [isCameraReady, isCameraOpen, qrDetected]);
+  }, [isCameraReady, isCameraOpen, qrDetected, restaurantProfile?.nif]);
 
   // Capture photo
-  const capture = () => {
+  const capture = async () => {
     const video = videoRef.current;
     if (!video || !isCameraReady || video.readyState < 2) return;
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth || 1280;
     canvas.height = video.videoHeight || 720;
     canvas.getContext('2d')?.drawImage(video, 0, 0);
-    const b64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
-    setCapturedImg(b64);
+    const rawDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    const normalized = await normalizeWithoutCrop(rawDataUrl);
+    if (!qrText) { setCameraError('Leia primeiro o QR fiscal da fatura.'); return; }
+    if (qrNifMismatch) { setCameraError(qrNifMismatch); return; }
+    if (duplicateWarning) { setCameraError(duplicateWarning); return; }
+    if (!normalized.quality.isReadable) { setCameraError(qualityMessage(normalized.quality)); return; }
+    setCapturedImg(normalized.data);
+    setCapturedQuality(normalized.quality);
     closeCamera();
   };
   useEffect(() => { captureRef.current = capture; });
 
   // File upload fallback
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onloadend = () => {
+    reader.onloadend = async () => {
       const dataUrl = reader.result as string;
-      setCapturedImg(dataUrl.split(',')[1]);
+      const normalized = await normalizeWithoutCrop(dataUrl);
+      const payloads = await scanQrPayloads([normalized.data]);
+      if (!payloads[0]) { setError('Não consegui ler o QR fiscal desta imagem.'); return; }
+      await applyQr(payloads[0]);
+      if (!normalized.quality.isReadable) { setError(qualityMessage(normalized.quality)); return; }
+      setCapturedImg(normalized.data);
+      setCapturedQuality(normalized.quality);
     };
     reader.readAsDataURL(file);
   };
 
   // ── Save ────────────────────────────────────────────────────
   const handleSave = async () => {
-    if (!category)            { setError('Escolha uma categoria.');            return; }
-    if (!supplier.trim())     { setError('Indique o fornecedor / descrição.'); return; }
-    if (!amount || Number(amount) <= 0) { setError('Indique um valor válido.'); return; }
+    if (!capturedImg) { setError('Fotografe a fatura.'); return; }
+    if (!qrText) { setError('Leia o QR fiscal da fatura.'); return; }
+    if (qrNifMismatch) { setError(qrNifMismatch); return; }
+    if (duplicateWarning) { setError(duplicateWarning); return; }
     setError(null);
     setIsSaving(true);
     try {
+      const parsedQr = parsePortugueseQrData(qrText);
       let archiveDocumentId: string | undefined;
       if (capturedImg) {
         const blob = await (await fetch(`data:image/jpeg;base64,${capturedImg}`)).blob();
@@ -232,24 +242,29 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
       await apiPost('/api/invoices', {
         supplierName: supplier.trim(),
         supplierNif: nif.replace(/\D/g, '') || undefined,
+        customerNif: parsedQr.customerNif,
         docNumber: docNumber.trim() || `DEP-${Date.now()}`,
+        documentType: parsedQr.documentType,
         totalAmount: Number(amount),
         dateIssued: date,
-        expenseCategory: category,
-        notes: notes.trim() || undefined,
+        expenseCategory: undefined,
+        notes: 'Despesa por classificar - pendente de revisão do gerente.',
         archiveDocumentId,
         atcud: atcud || undefined,
         qrCodeText: qrText || undefined,
+        qrTotalAmount: parsedQr.totalAmount,
         hasQrCode: !!qrText,
         hasAtcud: !!atcud,
-        imageQualityOk: !!capturedImg,
+        imageQualityOk: capturedQuality?.isReadable,
         totalValidationStatus: 'NAO_VERIFICADO',
         lines: [],
       });
       setSaved(true);
-      setCategory(''); setSupplier(''); setNif(''); setDocNumber('');
-      setAmount(''); setNotes(''); setAtcud(''); setQrText('');
+      setSupplier(''); setNif(''); setDocNumber('');
+      setAmount(''); setAtcud(''); setQrText('');
       setCapturedImg(null);
+      setCapturedQuality(null);
+      setDuplicateWarning(null);
       setDate(new Date().toISOString().split('T')[0]);
       setTimeout(() => setSaved(false), 3000);
       onSaved?.();
@@ -263,6 +278,12 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
   const hasCaptured = !!capturedImg;
   const qrReady     = !!qrText;
 
+  useEffect(() => {
+    if (capturedImg && qrReady && !qrNifMismatch && !duplicateWarning && !isSaving && !saved) {
+      handleSave();
+    }
+  }, [capturedImg, qrReady, qrNifMismatch, duplicateWarning]);
+
   // ── Camera overlay ─────────────────────────────────────────
   const overlay = isCameraOpen ? createPortal(
     <div style={{ position:'fixed', inset:0, width:'100vw', height:`${viewportHeight}px`, zIndex:2147483647, background:'#020617', overflow:'hidden', touchAction:'none' }}>
@@ -271,7 +292,7 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
       {/* Header */}
       <div className="absolute top-0 left-0 right-0 z-10 p-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between text-white bg-gradient-to-b from-black/75 to-transparent">
         <div>
-          <h4 className="font-black uppercase text-sm">Despesa — {category || 'Câmara'}</h4>
+          <h4 className="font-black uppercase text-sm">Despesa — Câmara</h4>
           <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest">
             {(window as any).BarcodeDetector ? 'Aponte o QR Code da fatura' : 'Enquadre e fotografe a fatura'}
           </p>
@@ -279,8 +300,17 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
         <button onClick={closeCamera} className="p-3 bg-white/10 hover:bg-white/20 rounded-full"><X size={20} /></button>
       </div>
 
+      {/* Adaptive invoice guide */}
+      {isCameraReady && (
+        <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center px-7 py-28">
+          <div className={`w-full ${liveQuality?.isLongReceipt ? 'max-w-[16rem]' : 'max-w-sm'} h-full max-h-[70vh] rounded-3xl border-4 border-dashed transition-all duration-300 ${
+            liveQuality?.isReadable ? 'border-emerald-400' : 'border-white/60'
+          }`} />
+        </div>
+      )}
+
       {/* QR brackets */}
-      {isCameraReady && (window as any).BarcodeDetector && (
+      {isCameraReady && (
         <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center">
           <div className="relative w-64 h-64">
             {(['tl','tr','bl','br'] as const).map(c => (
@@ -305,6 +335,22 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
         </div>
       )}
 
+      {liveQuality && !qrNifMismatch && !duplicateWarning && (
+        <div className={`absolute left-4 right-4 z-10 p-3 rounded-2xl text-white text-[10px] font-black uppercase ${
+          qrDetected ? 'top-40' : 'top-20'
+        } ${liveQuality.isReadable ? 'bg-emerald-500/90' : 'bg-orange-500/95'}`}>
+          {liveQuality.isReadable
+            ? `Boa para arquivo · ${liveQuality.isLongReceipt ? 'Talão' : 'Documento'} enquadrado · Nitidez ${liveQuality.sharpnessScore}%`
+            : `${liveQuality.qualityReasons.join(' · ')} · Nitidez ${liveQuality.sharpnessScore}%`}
+        </div>
+      )}
+
+      {duplicateWarning && (
+        <div className="absolute top-20 left-4 right-4 z-10 p-3 rounded-2xl bg-red-500/95 text-white text-[10px] font-black uppercase flex items-center gap-2">
+          <X size={14} /> {duplicateWarning}
+        </div>
+      )}
+
       {cameraError && <p className="absolute left-4 right-4 bottom-28 z-10 p-3 rounded-2xl bg-red-500/90 text-xs font-bold text-white">{cameraError}</p>}
 
       {/* Bottom controls */}
@@ -312,15 +358,23 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
         <button onClick={closeCamera} className="px-5 py-4 rounded-2xl border border-white/10 text-white/80 font-black uppercase text-xs hover:bg-white/10">Cancelar</button>
         <button
           onClick={() => captureRef.current?.()}
-          disabled={!isCameraReady}
+          disabled={!isCameraReady || !qrDetected || !liveQuality?.isReadable || !!qrNifMismatch || !!duplicateWarning}
           className={`flex-1 px-8 py-4 rounded-2xl text-white font-black uppercase text-xs flex items-center justify-center gap-2 shadow-2xl transition-all ${
-            !isCameraReady ? 'bg-orange-500/40 cursor-not-allowed'
+            !isCameraReady || !qrDetected || !liveQuality?.isReadable || !!qrNifMismatch || !!duplicateWarning ? 'bg-orange-500/40 cursor-not-allowed'
             : qrDetected ? 'bg-emerald-500 hover:bg-emerald-400 scale-105'
             : 'bg-orange-500 hover:bg-orange-600'
           }`}
         >
           <Camera size={18} />
-          {!isCameraReady ? 'A preparar…' : qrDetected ? 'Fotografar — QR OK' : 'Fotografar'}
+          {!isCameraReady
+            ? 'A preparar…'
+            : duplicateWarning
+              ? 'Fatura duplicada'
+              : !qrDetected
+                ? 'Leia o QR'
+                : !liveQuality?.isReadable
+                  ? 'Ajuste a fatura'
+                  : 'Fotografar — QR OK'}
         </button>
       </div>
     </div>,
@@ -332,37 +386,18 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
     <div className="max-w-2xl mx-auto space-y-6 pb-32">
       <div>
         <h2 className="text-2xl font-black uppercase italic tracking-tight">Nova Despesa</h2>
-        <p className="text-sm text-slate-400 font-bold mt-1">Arquivo digital + conta corrente. O QR Code preenche os dados automaticamente.</p>
+        <p className="text-sm text-slate-400 font-bold mt-1">Leia o QR fiscal e fotografe a fatura com qualidade. O gerente classifica depois.</p>
       </div>
 
-      {/* Step 1 — Category */}
+      {/* Capture */}
       <div className="bg-white rounded-[2.5rem] p-6 border border-slate-200 shadow-sm space-y-4">
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">1 · Categoria</p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {expenseCategories.map(cat => {
-            const ui = CATEGORY_UI[cat.id] ?? { icon: MoreHorizontal, color: 'bg-slate-50 text-slate-500 border-slate-200' };
-            const Icon = ui.icon;
-            const active = category === cat.id;
-            return (
-              <button key={cat.id} onClick={() => setCategory(cat.id)}
-                className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all text-center ${active ? ui.color + ' border-current shadow-md' : 'bg-white border-slate-100 text-slate-400 hover:border-slate-300'}`}>
-                <Icon size={22} />
-                <span className="text-[9px] font-black uppercase leading-tight">{cat.name}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Step 2 — Capture */}
-      <div className="bg-white rounded-[2.5rem] p-6 border border-slate-200 shadow-sm space-y-4">
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">2 · Documento / Recibo</p>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Documento / Recibo</p>
 
         {hasCaptured ? (
           <div className="space-y-3">
             <div className="relative rounded-2xl overflow-hidden border border-slate-200 aspect-video bg-slate-50">
               <img src={`data:image/jpeg;base64,${capturedImg}`} className="w-full h-full object-contain" />
-              <button onClick={() => { setCapturedImg(null); setQrText(''); setNif(''); setDocNumber(''); setAmount(''); setAtcud(''); }}
+              <button onClick={() => { setCapturedImg(null); setCapturedQuality(null); setQrText(''); setNif(''); setDocNumber(''); setAmount(''); setAtcud(''); }}
                 className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg">
                 <X size={14} />
               </button>
@@ -379,6 +414,12 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
                   <p className="text-xs font-black uppercase">⚠ NIF do Cliente Não Coincide</p>
                   <p className="text-xs font-bold mt-1 opacity-80">{qrNifMismatch}</p>
                 </div>
+              </div>
+            )}
+            {duplicateWarning && (
+              <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-2xl text-red-700">
+                <X size={18} className="shrink-0 mt-0.5" />
+                <p className="text-xs font-bold">{duplicateWarning}</p>
               </div>
             )}
           </div>
@@ -399,65 +440,17 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
         )}
       </div>
 
-      {/* Step 3 — Details */}
-      <div className="bg-white rounded-[2.5rem] p-6 border border-slate-200 shadow-sm space-y-4">
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-          3 · Dados
-          {qrReady && <span className="text-[9px] text-emerald-600 font-black normal-case">preenchidos via QR</span>}
-        </p>
-
-        <div className="space-y-1">
-          <label className="text-[9px] font-black text-slate-400 uppercase">Fornecedor / Descrição *</label>
-          <input className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-orange-400"
-            placeholder="Ex: EEM, Altice, Seguros Fidelidade…"
-            value={supplier} onChange={e => setSupplier(e.target.value)} />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1">
-              NIF {qrReady && nif && <QrCode size={10} className="text-emerald-500" />}
-            </label>
-            <input className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-orange-400"
-              placeholder="Opcional" value={nif} onChange={e => setNif(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1">
-              Nº Documento {qrReady && docNumber && <QrCode size={10} className="text-emerald-500" />}
-            </label>
-            <input className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-orange-400"
-              placeholder="Opcional" value={docNumber} onChange={e => setDocNumber(e.target.value)} />
+      {qrReady && (
+        <div className="bg-white rounded-[2.5rem] p-6 border border-slate-200 shadow-sm">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Dados fiscais do QR</p>
+          <div className="grid grid-cols-2 gap-3 text-xs font-bold text-slate-600">
+            <p>Fornecedor<br /><span className="font-black text-slate-900">{nif || '-'}</span></p>
+            <p>Empresa<br /><span className="font-black text-slate-900">{restaurantProfile?.nif || '-'}</span></p>
+            <p>Documento<br /><span className="font-black text-slate-900">{docNumber || '-'}</span></p>
+            <p>Total<br /><span className="font-black text-slate-900">€ {Number(amount || 0).toFixed(2)}</span></p>
           </div>
         </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1">
-              Valor * {qrReady && amount && <QrCode size={10} className="text-emerald-500" />}
-            </label>
-            <div className="relative">
-              <Euro size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input type="number" min="0" step="0.01"
-                className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black outline-none focus:border-orange-400"
-                placeholder="0.00" value={amount} onChange={e => setAmount(e.target.value)} />
-            </div>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1">
-              Data {qrReady && <QrCode size={10} className="text-emerald-500" />}
-            </label>
-            <input type="date"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-orange-400"
-              value={date} onChange={e => setDate(e.target.value)} />
-          </div>
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-[9px] font-black text-slate-400 uppercase">Notas</label>
-          <input className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-orange-400"
-            placeholder="Opcional" value={notes} onChange={e => setNotes(e.target.value)} />
-        </div>
-      </div>
+      )}
 
       {error && <div className="bg-red-50 border border-red-100 rounded-2xl p-4 text-red-600 text-sm font-bold">{error}</div>}
       {saved && (
@@ -466,10 +459,11 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
         </div>
       )}
 
-      <button onClick={handleSave} disabled={isSaving}
-        className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-sm shadow-2xl hover:bg-orange-500 transition-all disabled:opacity-50 flex items-center justify-center gap-3">
-        {isSaving ? <><RefreshCcw size={18} className="animate-spin" /> A Registar…</> : <><Check size={18} /> Registar Despesa</>}
-      </button>
+      {isSaving && (
+        <div className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-sm shadow-2xl flex items-center justify-center gap-3">
+          <RefreshCcw size={18} className="animate-spin" /> A Registar…
+        </div>
+      )}
 
       {overlay}
     </div>
