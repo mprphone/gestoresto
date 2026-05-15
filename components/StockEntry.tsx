@@ -721,7 +721,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const autoAcceptReady = Boolean(
     extractedData &&
     extractedData.items.length > 0 &&
-    extractedData.digitalCompliance?.imageQualityOk !== false &&
+    pageQualities.length > 0 &&
+    pageQualities.every(page => page.isReadable) &&
     !isProcessing &&
     !isSubmitting &&
     !isDuplicate &&
