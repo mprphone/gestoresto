@@ -70,6 +70,13 @@ export async function apiGet<T>(path: string): Promise<T> {
   return request<T>(path);
 }
 
+export async function apiGetBlob(path: string): Promise<Blob> {
+  if (shouldFailFast()) throw new Error(apiNotConfiguredMessage());
+  const response = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.blob();
+}
+
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, {
     method: 'POST',

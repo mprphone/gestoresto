@@ -18,6 +18,7 @@ import {
   Eye,
   Image as ImageIcon
 } from 'lucide-react';
+import AuthenticatedArchivePreview from './AuthenticatedArchivePreview';
 
 interface PurchasesListProps {
   invoices: PurchaseInvoice[];
@@ -362,19 +363,14 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, invoiceLines, p
                 {detailDocument?.publicUrl || detailInvoice.photoUrl ? (
                   <div className="space-y-4">
                     <div className="rounded-3xl overflow-hidden border border-slate-200 bg-white" style={{ height: '65vh' }}>
-                      {detailDocument?.mimeType === 'application/pdf' ? (
-                        <iframe
-                          src={detailDocument.publicUrl}
-                          className="w-full h-full"
-                          title="Fatura PDF"
-                        />
-                      ) : (
-                        <img
-                          src={detailDocument?.publicUrl || detailInvoice.photoUrl}
-                          className="w-full h-full object-contain"
-                          alt="Fatura"
-                        />
-                      )}
+                      <AuthenticatedArchivePreview
+                        archiveDocumentId={detailDocument?.id}
+                        mimeType={detailDocument?.mimeType}
+                        fallbackUrl={detailInvoice.photoUrl}
+                        className={`w-full h-full ${detailDocument?.mimeType === 'application/pdf' ? '' : 'object-contain'}`}
+                        title="Fatura PDF"
+                        alt="Fatura"
+                      />
                     </div>
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-2">
                       <p className="text-[10px] font-bold text-slate-500"><span className="font-black uppercase text-slate-400">Storage:</span> {detailDocument?.storageProvider || 'local'}</p>

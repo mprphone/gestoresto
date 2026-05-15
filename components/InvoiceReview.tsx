@@ -2,8 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { CheckCircle, Clock, RefreshCcw, FileText, AlertTriangle, Check, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { PendingInvoice, listPendingInvoices, markReviewed, markUnreviewed, updateReviewExpenseCategory } from '../data/reviewRepository';
-import { apiGet, apiUrl } from '../data/apiClient';
+import { apiGet } from '../data/apiClient';
 import { AppUser } from '../types';
+import AuthenticatedArchivePreview from './AuthenticatedArchivePreview';
 
 interface InvoiceReviewProps {
   currentUser: AppUser;
@@ -119,9 +120,7 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
           const validationOk = !inv.total_validation_status || inv.total_validation_status === 'VALIDO';
 
           const isExpanded = expandedId === inv.id;
-          const archiveUrl = inv.archive_id
-            ? apiUrl(`/api/archive/file/${inv.archive_id}`)
-            : undefined;
+          const archiveUrl = inv.archive_id ? true : undefined;
           const isPdf = inv.archive_mime_type === 'application/pdf';
           const isCreditNote = (() => {
             const dn = (inv.doc_number || '').toUpperCase().trim();
@@ -272,19 +271,13 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
               )}
               {isExpanded && archiveUrl && (
                 <div className="border-t border-slate-100 bg-slate-50" style={{ height: '70vh' }}>
-                  {isPdf ? (
-                    <iframe
-                      src={archiveUrl}
-                      className="w-full h-full"
-                      title={`Fatura ${inv.doc_number}`}
-                    />
-                  ) : (
-                    <img
-                      src={archiveUrl}
-                      className="w-full h-full object-contain p-4"
-                      alt={`Fatura ${inv.doc_number}`}
-                    />
-                  )}
+                  <AuthenticatedArchivePreview
+                    archiveDocumentId={inv.archive_id}
+                    mimeType={inv.archive_mime_type}
+                    className={`w-full h-full ${isPdf ? '' : 'object-contain p-4'}`}
+                    title={`Fatura ${inv.doc_number}`}
+                    alt={`Fatura ${inv.doc_number}`}
+                  />
                 </div>
               )}
               {isExpanded && !archiveUrl && (

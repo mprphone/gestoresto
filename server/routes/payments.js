@@ -25,9 +25,30 @@ paymentsRouter.post('/batch', async (req, res, next) => {
     const payload = req.body;
     const saved = await withTransaction(async client => {
       let remaining = typeof payload.amount === 'number' ? payload.amount : null;
+      if (remaining !== null && (!Number.isFinite(remaining) || remaining < 0)) {
+        const error = new Error('O valor do pagamento tem de ser positivo.');
+        error.status = 400;
+        throw error;
+      }
+
+      const invoiceIds = payload.invoiceIds || [];
+      if (remaining !== null && invoiceIds.length > 0) {
+        const dueRows = await client.query(`
+          select id, greatest(total_amount - paid_amount, 0) as due
+          from purchase_invoices
+          where id = any($1::uuid[]) and restaurant_id = $2 and status <> 'PAGO'
+          for update
+        `, [invoiceIds, req.restaurantId]);
+        const totalDue = dueRows.rows.reduce((sum, row) => sum + Number(row.due || 0), 0);
+        if (remaining > totalDue + 0.0001) {
+          const error = new Error(`O pagamento (€ ${remaining.toFixed(2)}) excede o valor em dívida (€ ${totalDue.toFixed(2)}).`);
+          error.status = 400;
+          throw error;
+        }
+      }
       const payments = [];
 
-      for (const invoiceId of payload.invoiceIds || []) {
+      for (const invoiceId of invoiceIds) {
         const before = await client.query('select * from purchase_invoices where id = $1 and restaurant_id = $2 for update', [invoiceId, req.restaurantId]);
         const invoice = before.rows[0];
         if (!invoice || invoice.status === 'PAGO') continue;

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import { query } from '../db.js';
+import { requireRestaurantContext } from '../middleware/restaurantContext.js';
 
 export const authRouter = Router();
 
@@ -113,13 +114,16 @@ authRouter.get('/context', async (req, res, next) => {
   }
 });
 
-authRouter.get('/users', async (_req, res, next) => {
+authRouter.get('/users', requireRestaurantContext, async (req, res, next) => {
   try {
     const result = await query(`
-      select id, name, email, phone, role, is_active, created_at, updated_at
-      from app_users
-      order by is_active desc, name asc
-    `);
+      select u.id, u.name, u.email, u.phone, u.role, u.is_active, u.created_at, u.updated_at
+      from user_restaurant_access ura
+      join app_users u on u.id = ura.user_id
+      where ura.restaurant_id = $1
+        and ura.is_active = true
+      order by u.is_active desc, u.name asc
+    `, [req.restaurantId]);
     res.json({ data: result.rows });
   } catch (error) {
     next(error);

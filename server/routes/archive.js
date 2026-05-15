@@ -12,7 +12,6 @@ import { requireRestaurantContext } from '../middleware/restaurantContext.js';
 export const archiveRouter = Router();
 
 archiveRouter.use((req, res, next) => {
-  if (req.path.startsWith('/file/')) return next();
   return requireRestaurantContext(req, res, next);
 });
 
@@ -56,7 +55,11 @@ archiveRouter.get('/invoice/:invoiceId', async (req, res, next) => {
 
 archiveRouter.get('/file/:id', async (req, res, next) => {
   try {
-    const result = await query('select storage_path, mime_type, original_filename from digital_archive_documents where id = $1', [req.params.id]);
+    const result = await query(`
+      select storage_path, mime_type, original_filename
+      from digital_archive_documents
+      where id = $1 and restaurant_id = $2
+    `, [req.params.id, req.restaurantId]);
     const doc = result.rows[0];
     if (!doc || !doc.storage_path || !fsSync.existsSync(doc.storage_path)) {
       res.status(404).json({ error: 'document not found' });

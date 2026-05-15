@@ -415,6 +415,16 @@ invoicesRouter.post('/', async (req, res, next) => {
         }));
       }
     }
+    const totalAmount = Number(payload.totalAmount || 0);
+    const paidAmount = Number(payload.paidAmount || 0);
+    if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+      res.status(400).json({ error: 'O valor pago tem de ser positivo.' });
+      return;
+    }
+    if (!isCredit && paidAmount > totalAmount + 0.0001) {
+      res.status(400).json({ error: `O valor pago (€ ${paidAmount.toFixed(2)}) não pode exceder o total da fatura (€ ${totalAmount.toFixed(2)}).` });
+      return;
+    }
     const saved = await withTransaction(async client => {
       const restaurantValidation = await validateRestaurantCustomer(client, payload, req.restaurantId);
       const totalValidation = validateInvoiceTotals(payload);
