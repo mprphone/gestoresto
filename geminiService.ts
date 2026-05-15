@@ -51,5 +51,24 @@ export interface InvoiceExtractedData {
 import { apiPost } from './data/apiClient';
 
 export const processInvoiceImage = async (base64Images: string[]): Promise<InvoiceExtractedData | null> => {
-  return apiPost<InvoiceExtractedData>('/api/gemini/analyze-invoice', { images: base64Images });
+  try {
+    return await apiPost<InvoiceExtractedData>('/api/gemini/analyze-invoice', { images: base64Images });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    const isTransientNetworkFailure = /load failed|failed to fetch|networkerror|network request failed/i.test(message);
+    if (!isTransientNetworkFailure) throw error;
+
+    // iOS Safari can drop an upload when the app loses focus briefly, for example
+    // during a phone call. One retry is cheap and avoids sending the operator back.
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    try {
+      return await apiPost<InvoiceExtractedData>('/api/gemini/analyze-invoice', { images: base64Images });
+    } catch (retryError) {
+      const retryMessage = retryError instanceof Error ? retryError.message : '';
+      if (/load failed|failed to fetch|networkerror|network request failed/i.test(retryMessage)) {
+        throw new Error('A ligação foi interrompida antes de enviar a imagem. Confirme a rede e tente novamente.');
+      }
+      throw retryError;
+    }
+  }
 };
