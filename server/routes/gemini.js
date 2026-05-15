@@ -95,6 +95,7 @@ const RESPONSE_SCHEMA = {
 };
 
 geminiRouter.post('/analyze-invoice', async (req, res, next) => {
+  const startedAt = Date.now();
   try {
     const { images } = req.body;
     if (!Array.isArray(images) || images.length === 0) {
@@ -146,6 +147,7 @@ geminiRouter.post('/analyze-invoice', async (req, res, next) => {
       category:   item.category || 'Outros'
     }));
 
+    console.log(`[gemini] analyzed ${images.length} image(s), items=${parsed.items.length}, model=${config.geminiModel}, ms=${Date.now() - startedAt}`);
     res.json(parsed);
   } catch (error) {
     console.error('Gemini analyze error:', error);

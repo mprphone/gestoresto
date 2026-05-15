@@ -290,8 +290,13 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setIsProcessing(true);
     setProcessingError(null);
     try {
-      const ocrPages = await prepareOcrPagesForAi(currentPages, currentQrPayloads.length > 0);
-      const data = await processInvoiceImage(ocrPages);
+      let data = await processInvoiceImage(currentPages);
+      if ((!data || data.items.length === 0) && currentQrPayloads.length > 0) {
+        const detailPages = await prepareOcrPagesForAi(currentPages, true);
+        if (detailPages.length > currentPages.length) {
+          data = await processInvoiceImage(detailPages);
+        }
+      }
       if (!data || data.items.length === 0) {
         setProcessingError(currentQrPayloads.length > 0
           ? 'O QR fiscal foi lido, mas não consegui estruturar as linhas dos artigos. Tente aproximar mais a folha ou fotografar só a zona da tabela.'
