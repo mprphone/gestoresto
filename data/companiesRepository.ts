@@ -1,5 +1,5 @@
 import { Company, Restaurant, AppUser } from '../types';
-import { apiGet, apiPost, apiDelete } from './apiClient';
+import { apiGet, apiPost, apiPut, apiDelete } from './apiClient';
 
 const fromCompany = (row: any): Company => ({
   id: row.id, name: row.name, nif: row.nif || undefined,
@@ -30,7 +30,7 @@ export async function createCompany(data: Partial<Company>): Promise<Company> {
 }
 
 export async function updateCompany(id: string, data: Partial<Company>): Promise<Company> {
-  const result = await apiPost<any>(`/api/companies/${id}`, data);
+  const result = await apiPut<any>(`/api/companies/${id}`, data);
   return fromCompany(result);
 }
 
@@ -46,7 +46,7 @@ export async function createRestaurant(data: Partial<Restaurant>): Promise<Resta
 }
 
 export async function updateRestaurant(id: string, data: Partial<Restaurant>): Promise<Restaurant> {
-  const result = await apiPost<any>(`/api/restaurants/${id}`, data);
+  const result = await apiPut<any>(`/api/restaurants/${id}`, data);
   return fromRestaurant(result);
 }
 

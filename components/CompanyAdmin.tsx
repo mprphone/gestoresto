@@ -25,10 +25,15 @@ interface RestaurantPanelProps {
   onUpdated: (r: Restaurant) => void;
   onClose: () => void;
 }
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const NIF_RE = /^\d{9}$/;
+
 const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated, onClose }) => {
   const [draft, setDraft] = useState<Restaurant>(restaurant);
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [userError, setUserError] = useState<string | null>(null);
   const [emailInput, setEmailInput] = useState('');
   const [users, setUsers] = useState<(AppUser & { accessRole: string })[]>([]);
   const [available, setAvailable] = useState<AppUser[]>([]);
@@ -44,15 +49,21 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
     listAvailableUsers(restaurant.id).then(setAvailable);
   }, [restaurant.id]);
 
+  const nifInvalid = draft.nif ? !NIF_RE.test(draft.nif.replace(/\s/g, '')) : false;
+
   const save = async () => {
+    if (nifInvalid) return;
     setSaving(true);
+    setSaveError(null);
     try {
       const r = await updateRestaurant(restaurant.id, {
-        name: draft.name, nif: draft.nif, notificationEmails: draft.notificationEmails
+        name: draft.name.trim(), nif: draft.nif?.trim() || undefined, notificationEmails: draft.notificationEmails
       });
       onUpdated(r);
       setSavedOk(true);
       setTimeout(() => setSavedOk(false), 2000);
+    } catch (e: any) {
+      setSaveError(e.message || 'Erro ao guardar. Tente novamente.');
     } finally { setSaving(false); }
   };
 
@@ -71,30 +82,42 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
 
   const doAddUser = async () => {
     if (!selUser) return;
-    await addUserToRestaurant(restaurant.id, selUser, selRole);
-    await reloadUsers();
-    setAddingUser(false); setSelUser(''); setSelRole('funcionario');
+    setUserError(null);
+    try {
+      await addUserToRestaurant(restaurant.id, selUser, selRole);
+      await reloadUsers();
+      setAddingUser(false); setSelUser(''); setSelRole('funcionario');
+    } catch (e: any) { setUserError(e.message || 'Erro ao associar utilizador.'); }
   };
 
   const doCreateUser = async () => {
-    if (!newUser.name.trim() || !newUser.email.trim() || !newUser.password.trim()) return;
-    const created = await saveUser({ name: newUser.name, email: newUser.email, phone: newUser.phone || undefined, password: newUser.password, role: newUser.role as any, isActive: true });
-    await addUserToRestaurant(restaurant.id, created.id, newUser.role);
-    await reloadUsers();
-    setCreatingUser(false);
-    setNewUser({ name: '', email: '', phone: '', password: '', role: 'funcionario' });
+    if (!newUser.name.trim()) { setUserError('Nome obrigatório.'); return; }
+    if (!EMAIL_RE.test(newUser.email.trim())) { setUserError('Email inválido.'); return; }
+    if (newUser.password.trim().length < 6) { setUserError('Password deve ter pelo menos 6 caracteres.'); return; }
+    setUserError(null);
+    try {
+      const created = await saveUser({ name: newUser.name.trim(), email: newUser.email.trim(), phone: newUser.phone || undefined, password: newUser.password, role: newUser.role as any, isActive: true });
+      await addUserToRestaurant(restaurant.id, created.id, newUser.role);
+      await reloadUsers();
+      setCreatingUser(false);
+      setNewUser({ name: '', email: '', phone: '', password: '', role: 'funcionario' });
+    } catch (e: any) { setUserError(e.message || 'Erro ao criar utilizador.'); }
   };
 
   const doChangeRole = async (userId: string, role: string) => {
-    await addUserToRestaurant(restaurant.id, userId, role);
-    setUsers(prev => prev.map(u => u.id === userId ? { ...u, accessRole: role } : u));
+    try {
+      await addUserToRestaurant(restaurant.id, userId, role);
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, accessRole: role } : u));
+    } catch (e: any) { setUserError(e.message || 'Erro ao alterar função.'); }
   };
 
   const doRemoveUser = async (userId: string) => {
-    await removeUserFromRestaurant(restaurant.id, userId);
-    setUsers(u => u.filter(x => x.id !== userId));
-    const av = await listAvailableUsers(restaurant.id);
-    setAvailable(av);
+    try {
+      await removeUserFromRestaurant(restaurant.id, userId);
+      setUsers(u => u.filter(x => x.id !== userId));
+      const av = await listAvailableUsers(restaurant.id);
+      setAvailable(av);
+    } catch (e: any) { setUserError(e.message || 'Erro ao remover utilizador.'); }
   };
 
   return (
@@ -126,7 +149,9 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
             <label className="space-y-1.5">
               <span className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1"><Hash size={10} /> NIF</span>
               <input value={draft.nif || ''} onChange={e => setDraft(d => ({ ...d, nif: e.target.value }))}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-orange-500/20" />
+                placeholder="9 dígitos"
+                className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-bold text-sm outline-none focus:ring-2 ${nifInvalid ? 'border-red-400 focus:ring-red-500/20' : 'border-slate-200 focus:ring-orange-500/20'}`} />
+              {nifInvalid && <p className="text-[10px] font-bold text-red-500">NIF deve ter exactamente 9 dígitos</p>}
             </label>
           </div>
 
@@ -153,8 +178,9 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
             </div>
           </div>
 
-          <button onClick={save} disabled={saving}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-black uppercase text-xs transition-all shadow-sm ${savedOk ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white hover:bg-orange-500'}`}>
+          {saveError && <p className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-4 py-2 rounded-xl">{saveError}</p>}
+          <button onClick={save} disabled={saving || nifInvalid || !draft.name.trim()}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-black uppercase text-xs transition-all shadow-sm ${savedOk ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white hover:bg-orange-500 disabled:opacity-40 disabled:cursor-not-allowed'}`}>
             {savedOk ? <><Check size={14} /> Guardado</> : <><Save size={14} /> {saving ? 'A guardar...' : 'Guardar'}</>}
           </button>
         </section>
@@ -218,8 +244,8 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input placeholder="Nome completo" value={newUser.name} onChange={e => setNewUser(d => ({ ...d, name: e.target.value }))}
                   className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/20" />
-                <input placeholder="Email" type="email" value={newUser.email} onChange={e => setNewUser(d => ({ ...d, email: e.target.value }))}
-                  className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/20" />
+                <input placeholder="Email" type="email" value={newUser.email} onChange={e => { setNewUser(d => ({ ...d, email: e.target.value })); setUserError(null); }}
+                  className={`px-3 py-2.5 bg-white border rounded-xl text-xs font-bold outline-none focus:ring-2 ${newUser.email && !EMAIL_RE.test(newUser.email.trim()) ? 'border-red-400 focus:ring-red-500/20' : 'border-slate-200 focus:ring-orange-500/20'}`} />
                 <input placeholder="Telefone" type="tel" value={newUser.phone} onChange={e => setNewUser(d => ({ ...d, phone: e.target.value }))}
                   className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500/20" />
                 <input placeholder="Password inicial" type="password" value={newUser.password} onChange={e => setNewUser(d => ({ ...d, password: e.target.value }))}
@@ -238,6 +264,8 @@ const RestaurantPanel: React.FC<RestaurantPanelProps> = ({ restaurant, onUpdated
               </div>
             </div>
           )}
+
+          {userError && <p className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-4 py-2 rounded-xl">{userError}</p>}
 
           {/* Action buttons */}
           {!addingUser && !creatingUser && (
