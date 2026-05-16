@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Camera, Upload, Check, X, PlusCircle, RefreshCcw, Copy } from 'lucide-react';
 import { processInvoiceImage, InvoiceExtractedData } from '../geminiService';
 import { Product, Category, Supplier, PurchaseInvoice, ProductAlias, StockEntryLineInput, RestaurantProfile } from '../types';
-import { analyzeCanvasQuality, normalizeWithoutCrop, PageQuality, PortugueseQrData, normalizePortugueseDocumentType, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads, validateInvoiceTotals } from './stock-entry/invoiceProcessor';
+import { analyzeCanvasQuality, cropDetectedDocumentForArchive, normalizeWithoutCrop, PageQuality, PortugueseQrData, normalizePortugueseDocumentType, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads, validateInvoiceTotals } from './stock-entry/invoiceProcessor';
 import { buildProductMatches, confidenceStyle, normalizeNif } from './stock-entry/productMatcher';
 import { checkInvoiceDuplicate } from '../data/invoicesRepository';
 
@@ -431,7 +431,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         reader.readAsDataURL(files[i]);
         const originalDataUrl = await p;
         const normalized = await normalizeWithoutCrop(originalDataUrl);
-        newOriginalPages.push(originalDataUrl);
+        const archivePage = await cropDetectedDocumentForArchive(originalDataUrl);
+        newOriginalPages.push(`data:image/jpeg;base64,${archivePage}`);
         newPages.push(normalized.data);
         newQualities.push(normalized.quality);
       }
@@ -497,7 +498,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     }
 
     const updated = [...pages, normalized.data];
-    const updatedOriginals = [...originalPages, rawDataUrl];
+    const archivePage = await cropDetectedDocumentForArchive(rawDataUrl);
+    const updatedOriginals = [...originalPages, `data:image/jpeg;base64,${archivePage}`];
     const newQrPayloads = await scanQrPayloads([normalized.data]);
     const updatedQrPayloads = [...qrPayloads, ...newQrPayloads];
     setPages(updated);
@@ -693,8 +695,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
       {/* Adaptive guide: narrower for long receipts, wider for normal invoices. */}
       {isCameraReady && (
-        <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center px-6 py-24">
-          <div className={`w-full ${livePageQuality?.isLongReceipt ? 'max-w-[14rem]' : 'max-w-[21rem]'} h-full max-h-[70vh] rounded-3xl border-4 border-dashed transition-all duration-300 ${
+        <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center px-4 py-20">
+          <div className={`w-full ${livePageQuality?.isLongReceipt ? 'max-w-[16rem]' : 'max-w-[calc(100vw-2rem)]'} h-full max-h-[calc(100vh-10rem)] rounded-3xl border-4 border-dashed transition-all duration-300 ${
             livePageQuality?.isReadable ? 'border-emerald-400' : 'border-white/60'
           }`} />
         </div>
@@ -859,7 +861,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                 <div className="grid grid-cols-2 gap-3 mb-6">
                    {pages.map((p, idx) => (
                      <div key={idx} className="relative group aspect-[3/4] rounded-2xl overflow-hidden border border-slate-200">
-                        <img src={`data:image/jpeg;base64,${p}`} className="w-full h-full object-cover" />
+                        <img src={originalPages[idx] || `data:image/jpeg;base64,${p}`} className="w-full h-full object-contain bg-slate-50" />
                         <button onClick={() => {
                           setPages(prev => prev.filter((_, i) => i !== idx));
                           setOriginalPages(prev => prev.filter((_, i) => i !== idx));

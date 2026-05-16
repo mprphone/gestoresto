@@ -375,8 +375,8 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
 
       {/* Adaptive invoice guide */}
       {isCameraReady && (
-        <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center px-6 py-24">
-          <div className={`w-full ${liveQuality?.isLongReceipt ? 'max-w-[14rem]' : 'max-w-[21rem]'} h-full max-h-[70vh] rounded-3xl border-4 border-dashed transition-all duration-300 ${
+        <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center px-4 py-20">
+          <div className={`w-full ${liveQuality?.isLongReceipt ? 'max-w-[16rem]' : 'max-w-[calc(100vw-2rem)]'} h-full max-h-[calc(100vh-10rem)] rounded-3xl border-4 border-dashed transition-all duration-300 ${
             liveQuality?.isReadable ? 'border-emerald-400' : 'border-white/60'
           }`} />
         </div>
