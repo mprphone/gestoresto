@@ -16,6 +16,7 @@ export const config = {
   databaseName: process.env.PGDATABASE || 'gestoresto',
   databaseUser: process.env.PGUSER || process.env.USER || 'ubuntu',
   databaseHost: process.env.PGHOST || '/var/run/postgresql',
+  frontendUrl: (process.env.FRONTEND_URL || '').replace(/\/$/, ''),
   archiveRoot: process.env.ARCHIVE_ROOT || '/mnt/bunker/resto',
   invoiceOkEmailTo: process.env.INVOICE_OK_EMAIL_TO || 'geral@mrebelo.com',
   smtp: {

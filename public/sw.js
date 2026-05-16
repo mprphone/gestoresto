@@ -26,16 +26,21 @@ self.addEventListener('notificationclick', event => {
   event.notification.close();
   if (event.action === 'dismiss') return;
 
-  const url = event.notification.data?.url || '/';
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
-      for (const client of windowClients) {
-        if (client.url.includes(self.location.origin) && 'focus' in client) {
-          client.postMessage({ type: 'navigate', url });
-          return client.focus();
-        }
+      // Prefer review-app clients (standalone PWA)
+      const reviewClient = windowClients.find(c => c.url.includes('/review-app/'));
+      if (reviewClient && 'focus' in reviewClient) return reviewClient.focus();
+
+      // Fall back to main-app clients with navigation message
+      const mainClient = windowClients.find(c => c.url.includes(self.location.origin));
+      if (mainClient && 'focus' in mainClient) {
+        mainClient.postMessage({ type: 'navigate', url: '/?tab=review' });
+        return mainClient.focus();
       }
-      return clients.openWindow(url);
+
+      // No open window — launch review PWA
+      return clients.openWindow('/review-app/');
     })
   );
 });

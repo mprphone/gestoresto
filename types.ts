@@ -47,7 +47,7 @@ export interface RestaurantProfile {
   notificationEmails?: string[];
 }
 
-export type AppUserRole = 'admin' | 'funcionario' | 'compras' | 'cozinha' | 'financeiro';
+export type AppUserRole = 'admin' | 'superadmin' | 'gerente' | 'funcionario' | 'compras' | 'cozinha' | 'financeiro';
 
 export interface Company {
   id: string;

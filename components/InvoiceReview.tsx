@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, Clock, RefreshCcw, FileText, AlertTriangle, Check, X, ChevronUp, Save, ArrowRightLeft, Trash2, Cpu } from 'lucide-react';
+import { CheckCircle, Clock, RefreshCcw, FileText, AlertTriangle, Check, X, ChevronUp, Save, ArrowRightLeft, Trash2, Cpu, Smartphone } from 'lucide-react';
 import { PendingInvoice, PendingGuia, ReviewInvoiceLine, listPendingInvoices, listPendingGuias, listReviewInvoiceLines, markReviewed, markUnreviewed, markGuiaReviewed, markGuiaRejected, updateReviewExpenseCategory, updateReviewInvoiceLine, reanalyzeInvoice } from '../data/reviewRepository';
 import { listProductsPage } from '../data/productsRepository';
 import { apiGet } from '../data/apiClient';
@@ -25,6 +25,9 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
   const [products, setProducts] = useState<Product[]>([]);
   const [reviewLines, setReviewLines] = useState<Record<string, ReviewInvoiceLine[]>>({});
   const [loadingLines, setLoadingLines] = useState<Record<string, boolean>>({});
+  const [pwaBannerDismissed, setPwaBannerDismissed] = useState(() =>
+    typeof sessionStorage !== 'undefined' && sessionStorage.getItem('review_pwa_dismissed') === '1'
+  );
 
   const load = async () => {
     setIsLoading(true);
@@ -204,6 +207,35 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
         </button>
       </div>
 
+      {/* PWA install banner — shown to admins in main app only */}
+      {!pwaBannerDismissed && typeof window !== 'undefined' && !window.location.pathname.startsWith('/review-app') && (
+        <div className="bg-slate-900 text-white rounded-2xl p-4 flex items-center gap-4">
+          <div className="w-10 h-10 bg-orange-500/20 rounded-xl flex items-center justify-center shrink-0">
+            <Smartphone size={18} className="text-orange-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-black">App de Revisão para Telemóvel</p>
+            <p className="text-xs text-slate-400 font-medium mt-0.5">Instale no telemóvel para receber notificações de novas faturas</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <a
+              href={`${window.location.origin}/review-app/`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-black rounded-xl transition-colors whitespace-nowrap"
+            >
+              Abrir
+            </a>
+            <button
+              onClick={() => { setPwaBannerDismissed(true); sessionStorage.setItem('review_pwa_dismissed', '1'); }}
+              className="p-2 text-slate-500 hover:text-white transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="bg-red-50 border border-red-100 rounded-2xl p-4 text-red-600 text-sm font-bold">{error}</div>
       )}
@@ -330,7 +362,7 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
             if (inv.document_type === 'NC') return true;
             const dn = (inv.doc_number || '').toUpperCase().trim();
             if (dn.startsWith('NC') || dn.startsWith('N/C')) return true;
-            const qr = inv.qr_code_text || '';
+            const qr = (inv as any).qr_code_text || '';
             const m = qr.match(/\*?D:([^*]+)/);
             return m ? m[1].trim().toUpperCase() === 'NC' : false;
           })();

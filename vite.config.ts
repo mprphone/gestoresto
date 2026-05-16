@@ -21,6 +21,14 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      },
+      build: {
+        rollupOptions: {
+          input: {
+            main: path.resolve(__dirname, 'index.html'),
+            review: path.resolve(__dirname, 'review.html')
+          }
+        }
       }
     };
 });

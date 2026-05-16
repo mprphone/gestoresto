@@ -28,6 +28,25 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
 
+// Redirect /review-app/* to the frontend PWA (Express only serves the API)
+app.get(['/review-app', '/review-app/*'], (_req, res) => {
+  if (config.frontendUrl) {
+    return res.redirect(302, `${config.frontendUrl}/review-app/`);
+  }
+  res.type('html').send(`
+    <!doctype html><html lang="pt"><head>
+      <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+      <title>App de Revisão — GestoRestô</title>
+      <style>body{font-family:system-ui,sans-serif;margin:0;background:#020617;color:#f8fafc;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;box-sizing:border-box}main{max-width:420px;text-align:center}p{color:#94a3b8;line-height:1.6}code{background:#1e293b;padding:4px 8px;border-radius:8px;font-size:14px}</style>
+    </head><body><main>
+      <div style="font-size:48px;margin-bottom:16px">📋</div>
+      <h2 style="margin:0 0 12px">App de Revisão</h2>
+      <p>Configure a variável <code>FRONTEND_URL</code> no servidor API para redirecionar aqui automaticamente.</p>
+      <p style="margin-top:24px;font-size:13px">Aceda à aplicação principal no endereço do Vercel e use o link de instalação na secção de Revisão.</p>
+    </main></body></html>
+  `);
+});
+
 app.get('/', (_req, res) => {
   res.type('html').send(`
     <!doctype html>

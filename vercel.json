@@ -1,0 +1,7 @@
+{
+  "rewrites": [
+    { "source": "/review-app/(.*)", "destination": "/review.html" },
+    { "source": "/review-app", "destination": "/review.html" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
