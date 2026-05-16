@@ -1,11 +1,14 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, Upload, Check, X, PlusCircle, RefreshCcw, Copy } from 'lucide-react';
+import { Camera, Upload, X, PlusCircle, RefreshCcw, Copy } from 'lucide-react';
 import { processInvoiceImage, InvoiceExtractedData } from '../geminiService';
 import { Product, Category, Supplier, PurchaseInvoice, ProductAlias, StockEntryLineInput, RestaurantProfile } from '../types';
-import { analyzeCanvasQuality, cropDetectedDocumentForArchive, normalizeWithoutCrop, PageQuality, PortugueseQrData, normalizePortugueseDocumentType, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads, validateInvoiceTotals } from './stock-entry/invoiceProcessor';
-import { buildProductMatches, confidenceStyle, normalizeNif } from './stock-entry/productMatcher';
+import { cropDetectedDocumentForArchive, normalizeWithoutCrop, PageQuality, PortugueseQrData, normalizePortugueseDocumentType, parsePortugueseQrData, scanQrPayloads, validateInvoiceTotals } from './stock-entry/invoiceProcessor';
+import { buildProductMatches, normalizeNif } from './stock-entry/productMatcher';
+import { CameraOverlay } from './stock-entry/CameraOverlay';
+import { InvoiceReviewPanel } from './stock-entry/InvoiceReviewPanel';
+import { useCamera } from './stock-entry/useCamera';
 import { checkInvoiceDuplicate } from '../data/invoicesRepository';
 
 interface StockEntryProps {
@@ -36,26 +39,14 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const [docNumber, setDocNumber] = useState('');
   const [isDuplicate, setIsDuplicate] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
-  const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const [isCameraReady, setIsCameraReady] = useState(false);
-  const [cameraIsMultiMode, setCameraIsMultiMode] = useState(false);
-  const [capturedParts, setCapturedParts] = useState(0);
-  const [qrLiveDetected, setQrLiveDetected] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [nifMismatch, setNifMismatch] = useState<string | null>(null);
-  const [liveQrNifError, setLiveQrNifError] = useState<string | null>(null);
-  const [livePageQuality, setLivePageQuality] = useState<PageQuality | null>(null);
   const [qrPayloads, setQrPayloads] = useState<string[]>([]);
   const [qrData, setQrData] = useState<PortugueseQrData | null>(null);
   const [pageQualities, setPageQualities] = useState<PageQuality[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [cameraViewportHeight, setCameraViewportHeight] = useState(720);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const cameraStreamRef = useRef<MediaStream | null>(null);
-  const captureCameraPageRef = useRef<() => Promise<void>>();
   const autoSubmitRef = useRef(false);
 
   useEffect(() => {
@@ -65,13 +56,6 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       if (exists) setDuplicateWarning(`Este documento ${docNumber} já foi inserido anteriormente.`);
     }
   }, [nif, docNumber, invoices]);
-
-  useEffect(() => {
-    return () => stopCamera();
-  }, []);
-
-  // Keep ref pointing to latest captureCameraPage (avoids stale closures in scan timer)
-  useEffect(() => { captureCameraPageRef.current = captureCameraPage; });
 
   const applyQrData = (qrText: string) => {
     const parsed = parsePortugueseQrData(qrText);
@@ -100,7 +84,6 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       if (result.duplicate) {
         setIsDuplicate(true);
         setDuplicateWarning(result.message || 'Esta fatura já foi registada anteriormente.');
-        setCameraError(result.message || 'Esta fatura já foi registada anteriormente.');
         return true;
       }
     } catch {
@@ -167,158 +150,6 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       }
     }
     return ocrPages.length > 0 ? ocrPages : sourcePages;
-  };
-
-  // Live scan keeps measuring archive quality even after the QR latches green.
-  // That lets the operator re-frame the whole invoice before taking the photo.
-  useEffect(() => {
-    if (!isCameraReady || !isCameraOpen) return;
-    const BarcodeDetectorCtor = (window as any).BarcodeDetector;
-    const detector = BarcodeDetectorCtor ? new BarcodeDetectorCtor({ formats: ['qr_code'] }) : null;
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    let active = true;
-
-    const scan = async () => {
-      if (!active) return;
-      const video = videoRef.current;
-      if (video && video.readyState >= 2) {
-        try {
-          let qrText: string | null = null;
-
-          if (detector) {
-            const codes = await detector.detect(video);
-            if (codes.length > 0 && codes[0]?.rawValue) qrText = codes[0].rawValue;
-          }
-          if (ctx) {
-            const sw = video.videoWidth || 0;
-            const sh = video.videoHeight || 0;
-            if (sw > 0 && sh > 0) {
-              const scanWidth = Math.min(720, sw);
-              canvas.width = scanWidth;
-              canvas.height = Math.round(scanWidth * (sh / sw));
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              setLivePageQuality(analyzeCanvasQuality(canvas));
-              if (!qrText) qrText = scanQrFromCanvas(canvas) || null;
-            }
-          }
-
-          if (qrText) {
-            const parsedQr = applyQrData(qrText);
-            setQrPayloads(prev => prev.includes(qrText) ? prev : [...prev, qrText]);
-            if (await checkQrDuplicate(parsedQr)) return;
-            const nifErr = checkQrBuyerNif(parsedQr);
-            if (nifErr) {
-              setLiveQrNifError(nifErr);
-              setNifMismatch(nifErr);
-              // Keep scanning — user may move to correct invoice
-              if (active) setTimeout(scan, 1200);
-              return;
-            }
-            setLiveQrNifError(null);
-            setNifMismatch(null);
-            setQrLiveDetected(true); // latch green — NIF OK
-          }
-        } catch { /* ignore per-frame errors */ }
-      }
-      if (active) setTimeout(scan, 600);
-    };
-
-    scan();
-    return () => { active = false; };
-  }, [isCameraReady, isCameraOpen, suppliers, restaurantProfile?.nif]);
-
-  useEffect(() => {
-    if (!isCameraOpen) return;
-
-    setIsCameraReady(false);
-    const stream = cameraStreamRef.current;
-    const video = videoRef.current;
-    if (!video || !stream) return;
-
-    let warmupTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const onCanPlay = () => {
-      // iOS needs extra time after canplay for the sensor to deliver real frames
-      warmupTimer = setTimeout(() => setIsCameraReady(true), 600);
-    };
-
-    video.addEventListener('canplay', onCanPlay);
-    video.srcObject = stream;
-    video.play().catch(() => undefined);
-
-    return () => {
-      video.removeEventListener('canplay', onCanPlay);
-      if (warmupTimer) clearTimeout(warmupTimer);
-    };
-  }, [isCameraOpen]);
-
-  useEffect(() => {
-    if (!isCameraOpen) return;
-
-    const updateViewportHeight = () => {
-      setCameraViewportHeight(Math.round(window.visualViewport?.height || window.innerHeight || 720));
-    };
-    const previousBodyOverflow = document.body.style.overflow;
-    const previousHtmlOverflow = document.documentElement.style.overflow;
-
-    updateViewportHeight();
-    document.body.style.overflow = 'hidden';
-    document.documentElement.style.overflow = 'hidden';
-    window.addEventListener('resize', updateViewportHeight);
-    window.visualViewport?.addEventListener('resize', updateViewportHeight);
-    window.visualViewport?.addEventListener('scroll', updateViewportHeight);
-
-    return () => {
-      document.body.style.overflow = previousBodyOverflow;
-      document.documentElement.style.overflow = previousHtmlOverflow;
-      window.removeEventListener('resize', updateViewportHeight);
-      window.visualViewport?.removeEventListener('resize', updateViewportHeight);
-      window.visualViewport?.removeEventListener('scroll', updateViewportHeight);
-    };
-  }, [isCameraOpen]);
-
-  const stopCamera = () => {
-    cameraStreamRef.current?.getTracks().forEach(track => track.stop());
-    cameraStreamRef.current = null;
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-  };
-
-  const openCamera = async () => {
-    setCameraError(null);
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraError('Este browser não dá acesso direto à câmara. Use Abrir Ficheiro ou atualize o browser.');
-      return;
-    }
-
-    try {
-      stopCamera();
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        },
-        audio: false
-      });
-      cameraStreamRef.current = stream;
-      setIsCameraOpen(true);
-    } catch (error) {
-      setCameraError('Não consegui abrir a câmara. Confirme as permissões do browser e se está em HTTPS ou localhost.');
-    }
-  };
-
-  const closeCamera = () => {
-    stopCamera();
-    setIsCameraOpen(false);
-    setIsCameraReady(false);
-    setCameraIsMultiMode(false);
-    setCapturedParts(0);
-    setQrLiveDetected(false);
-    setLiveQrNifError(null);
-    setLivePageQuality(null);
   };
 
   const processAllPages = async (currentPages: string[], currentQrPayloads = qrPayloads) => {
@@ -480,83 +311,26 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     }
   };
 
-  const captureCameraPage = async () => {
-    setQrLiveDetected(false);
-    setLiveQrNifError(null);
-    const video = videoRef.current;
-    if (!video || !isCameraReady || video.readyState < 2) {
-      setCameraError('A câmara ainda não está pronta. Aguarde um momento e tente novamente.');
-      return;
-    }
-
-    const canvas = document.createElement('canvas');
-    const sourceWidth = video.videoWidth || 1280;
-    const sourceHeight = video.videoHeight || 720;
-    const maxWidth = 2000;
-    const scale = Math.min(1, maxWidth / sourceWidth);
-    canvas.width = Math.round(sourceWidth * scale);
-    canvas.height = Math.round(sourceHeight * scale);
-    const ctx = canvas.getContext('2d');
-    ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const rawDataUrl = canvas.toDataURL('image/jpeg', 0.92);
-
-    const normalized = await normalizeWithoutCrop(rawDataUrl);
-    if (!normalized.quality.isReadable) {
-      setCameraError(qualityErrorMessage(normalized.quality));
-      return;
-    }
-
-    const updated = [...pages, normalized.data];
-    const archivePage = await cropDetectedDocumentForArchive(rawDataUrl);
-    const updatedOriginals = [...originalPages, `data:image/jpeg;base64,${archivePage}`];
-    const newQrPayloads = await scanQrPayloads([normalized.data]);
-    const updatedQrPayloads = [...qrPayloads, ...newQrPayloads];
-
-    // NIF check immediately after capture — before calling Gemini
-    if (updatedQrPayloads.length > 0) {
-      const parsedQr = applyQrData(updatedQrPayloads[0]);
-      if (await checkQrDuplicate(parsedQr)) {
-        closeCamera();
-        return;
-      }
-      const nifErr = checkQrBuyerNif(parsedQr);
-      setNifMismatch(nifErr);
-      if (nifErr) {
-        setCameraError(`${nifErr}. Não é possível analisar esta fatura.`);
-        return;
-      }
-    } else {
-      setNifMismatch(null);
-    }
-
-    setPages(updated);
-    setOriginalPages(updatedOriginals);
-    setQrPayloads(updatedQrPayloads);
-    setPageQualities(prev => [...prev, { ...normalized.quality, hasQrCode: Boolean(newQrPayloads[0]) }]);
-
-    const isLong = normalized.width > 0 && (normalized.height / normalized.width) > 2.5;
-    const newPartCount = capturedParts + 1;
-
-    if (isLong || cameraIsMultiMode) {
-      setCameraIsMultiMode(true);
-      setCapturedParts(newPartCount);
-      setIsCameraReady(false);
-      if (newPartCount >= 3) {
-        closeCamera();
-        await processAllPages(updatedOriginals, updatedQrPayloads);
-      }
-    } else {
-      closeCamera();
-      await processAllPages(updatedOriginals, updatedQrPayloads);
-    }
-  };
-
-  const analyzeCameraParts = async () => {
-    const currentPages = originalPages.length > 0 ? originalPages : pages;
-    const currentQrPayloads = qrPayloads;
-    closeCamera();
-    await processAllPages(currentPages, currentQrPayloads);
-  };
+  const camera = useCamera({
+    pages,
+    originalPages,
+    qrPayloads,
+    qrData,
+    isDuplicate,
+    suppliersKey: suppliers,
+    restaurantNif: restaurantProfile?.nif,
+    setPages,
+    setOriginalPages,
+    setQrPayloads,
+    setPageQualities,
+    setNifMismatch,
+    applyQrData,
+    checkQrDuplicate,
+    checkQrBuyerNif,
+    processAllPages,
+    qualityErrorMessage
+  });
+  const { openCamera, cameraError } = camera;
 
   const resetEntry = () => {
     setPages([]);
@@ -576,8 +350,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     setDuplicateWarning(null);
     setProcessingError(null);
     setNifMismatch(null);
-    setLiveQrNifError(null);
-    setLivePageQuality(null);
+    camera.resetCameraState();
     setQrPayloads([]);
     setQrData(null);
     setPageQualities([]);
@@ -658,168 +431,6 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const confirmEntryRef = useRef(confirmEntry);
   useEffect(() => { confirmEntryRef.current = confirmEntry; });
 
-  const cameraOverlay = isCameraOpen ? (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        width: '100vw',
-        height: `${cameraViewportHeight}px`,
-        zIndex: 2147483647,
-        background: '#020617',
-        overflow: 'hidden',
-        touchAction: 'none',
-        transform: 'translateZ(0)',
-        WebkitTransform: 'translateZ(0)'
-      }}
-    >
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          background: '#000'
-        }}
-      />
-      {/* Header */}
-      <div className="absolute top-0 left-0 right-0 z-10 p-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between text-white bg-gradient-to-b from-black/75 to-transparent">
-        <div>
-          {cameraIsMultiMode ? (
-            <>
-              <div className="flex items-center gap-2 mb-1">
-                {[1, 2, 3].map(n => (
-                  <span key={n} className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black ${n <= capturedParts ? 'bg-emerald-500 text-white' : 'bg-white/20 text-white/50'}`}>{n <= capturedParts ? '✓' : n}</span>
-                ))}
-              </div>
-              <p className="text-[10px] font-bold text-white/60 uppercase tracking-widest">
-                {capturedParts === 0 ? 'Fotografe a parte seguinte' : `Parte ${capturedParts} capturada — fotografe a continuação`}
-              </p>
-            </>
-          ) : (
-            <>
-              <h4 className="font-black uppercase text-sm">Câmara</h4>
-              <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest">
-                QR detetado automaticamente
-              </p>
-            </>
-          )}
-        </div>
-        <button onClick={closeCamera} className="p-3 bg-white/10 hover:bg-white/20 rounded-full transition-colors">
-          <X size={20} />
-        </button>
-      </div>
-
-      {/* Adaptive guide: narrower for long receipts, wider for normal invoices. */}
-      {isCameraReady && (
-        <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center px-4 py-20">
-          <div className={`w-full ${livePageQuality?.isLongReceipt ? 'max-w-[16rem]' : 'max-w-[calc(100vw-2rem)]'} h-full max-h-[calc(100vh-10rem)] rounded-3xl border-4 border-dashed transition-all duration-300 ${
-            livePageQuality?.isReadable ? 'border-emerald-400' : 'border-white/60'
-          }`} />
-        </div>
-      )}
-
-      {/* QR scanner brackets — green=OK, red=NIF error, white=scanning */}
-      {isCameraReady && (
-        <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center">
-          <div className="relative w-64 h-64">
-            {(['tl','tr','bl','br'] as const).map(c => (
-              <span key={c} className={`absolute w-12 h-12 transition-colors duration-300
-                ${liveQrNifError ? 'border-red-400' : qrLiveDetected ? 'border-emerald-400' : 'border-white/70'}
-                ${c==='tl' ? 'top-0 left-0 border-t-4 border-l-4 rounded-tl-xl' : ''}
-                ${c==='tr' ? 'top-0 right-0 border-t-4 border-r-4 rounded-tr-xl' : ''}
-                ${c==='bl' ? 'bottom-0 left-0 border-b-4 border-l-4 rounded-bl-xl' : ''}
-                ${c==='br' ? 'bottom-0 right-0 border-b-4 border-r-4 rounded-br-xl' : ''}`} />
-            ))}
-            <span className={`absolute inset-0 flex items-center justify-center text-[10px] font-black uppercase tracking-widest transition-colors duration-300
-              ${liveQrNifError ? 'text-red-400' : qrLiveDetected ? 'text-emerald-400' : 'text-white/40'}`}>
-              {liveQrNifError ? '✗ NIF' : qrLiveDetected ? '✓ QR OK' : 'QR...'}
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* NIF error banner — shown immediately when QR is detected with wrong NIF */}
-      {liveQrNifError && (
-        <div className="absolute top-20 left-4 right-4 z-20 p-3 rounded-2xl bg-red-500/95 text-white text-[10px] font-black uppercase flex items-center gap-2">
-          <X size={14} className="shrink-0" /> {liveQrNifError}
-        </div>
-      )}
-
-      {qrLiveDetected && qrData && !liveQrNifError && (
-        <div className="absolute top-20 left-4 right-4 z-20 p-3 rounded-2xl bg-emerald-500/95 text-white text-[10px] font-black uppercase space-y-1">
-          <div className="flex items-center gap-2">
-            <Check size={14} className="shrink-0" /> QR fiscal lido e NIF da empresa validado
-          </div>
-          <p className="opacity-85">
-            Forn. {qrData.supplierNif || '-'} · Empresa {qrData.customerNif || 'sem NIF'} · Total {qrData.totalAmount ? `€ ${qrData.totalAmount.toFixed(2)}` : '-'}
-          </p>
-        </div>
-      )}
-
-      {livePageQuality && !liveQrNifError && (
-        <div className={`absolute left-4 right-4 z-20 p-3 rounded-2xl text-white text-[10px] font-black uppercase ${
-          qrLiveDetected ? 'top-40' : 'top-20'
-        } ${livePageQuality.isReadable ? 'bg-emerald-500/95' : 'bg-orange-500/95'}`}>
-          {livePageQuality.isReadable
-            ? `Boa para arquivo · ${livePageQuality.isLongReceipt ? 'Talão' : 'Documento'} enquadrado · Nitidez ${livePageQuality.sharpnessScore}%`
-            : `${livePageQuality.qualityReasons.join(' · ')} · Nitidez ${livePageQuality.sharpnessScore}%`}
-        </div>
-      )}
-
-      {/* Multi-mode banner */}
-      {cameraIsMultiMode && capturedParts > 0 && !qrLiveDetected && (
-        <div className="absolute top-20 left-4 right-4 z-10 p-3 rounded-2xl bg-emerald-500/90 text-white text-[10px] font-black uppercase flex items-center gap-2">
-          <Check size={14} /> {capturedParts === 1 ? '1 parte capturada' : `${capturedParts} partes capturadas`} — enquadre a parte seguinte e fotografe
-        </div>
-      )}
-
-      {cameraError && <p className="absolute left-4 right-4 bottom-28 z-10 p-3 rounded-2xl bg-red-500/90 text-xs font-bold text-white">{cameraError}</p>}
-
-      {/* Bottom controls */}
-      <div className="absolute left-0 right-0 bottom-0 z-10 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex gap-3 justify-end bg-gradient-to-t from-black/80 to-transparent">
-        <button onClick={closeCamera} className="px-5 py-4 rounded-2xl border border-white/10 text-white/80 font-black uppercase text-xs hover:text-white hover:bg-white/10 transition-all">Cancelar</button>
-        {cameraIsMultiMode && capturedParts > 0 && (
-          <button
-            onClick={analyzeCameraParts}
-            className="px-6 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-xs transition-all flex items-center justify-center gap-2 shadow-xl"
-          >
-            <Check size={16} /> Analisar {capturedParts} {capturedParts === 1 ? 'parte' : 'partes'}
-          </button>
-        )}
-        <button
-          onClick={captureCameraPage}
-          disabled={!isCameraReady || !livePageQuality?.isReadable || !!liveQrNifError || isDuplicate}
-          className={`flex-1 sm:flex-none px-8 py-4 rounded-2xl text-white font-black uppercase text-xs transition-all flex items-center justify-center gap-2 shadow-2xl ${
-            !isCameraReady || !livePageQuality?.isReadable || !!liveQrNifError || isDuplicate ? 'bg-orange-500/40 cursor-not-allowed'
-            : qrLiveDetected ? 'bg-emerald-500 hover:bg-emerald-400 scale-105'
-            : 'bg-orange-500 hover:bg-orange-600'
-          }`}
-        >
-          <Camera size={18} />
-          {!isCameraReady
-            ? 'A preparar…'
-            : isDuplicate
-              ? 'Fatura duplicada'
-            : !livePageQuality?.isReadable
-              ? 'Ajuste a fatura'
-              : qrLiveDetected
-                ? 'Capturar — QR OK'
-                : cameraIsMultiMode
-                  ? `Fotografar Parte ${capturedParts + 1}`
-                  : 'Fotografar'}
-        </button>
-      </div>
-    </div>
-  ) : null;
 
   const matchedItemsCount = extractedData ? extractedData.items.filter((_, idx) => mapping[idx]).length : 0;
   const totalItemsCount = extractedData?.items.length || 0;
@@ -941,154 +552,38 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
           <div className="lg:col-span-8 space-y-6">
              {extractedData ? (
-               <div className="animate-in slide-in-from-right-4">
-                 <div className="bg-white p-4 sm:p-8 rounded-[1.5rem] sm:rounded-[3rem] shadow-sm border border-slate-200 space-y-4 sm:space-y-8">
-                    <div className="sticky top-0 z-20 -mx-4 -mt-4 sm:mx-0 sm:mt-0 p-4 sm:p-0 bg-white/95 sm:bg-transparent backdrop-blur border-b border-slate-100 sm:border-0">
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                          <p className="text-[8px] font-black text-slate-400 uppercase">Total</p>
-                          <p className="text-lg font-black text-slate-900">€ {extractedData.totalInvoiceAmount.toFixed(2)}</p>
-                        </div>
-                        <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                          <p className="text-[8px] font-black text-slate-400 uppercase">Artigos</p>
-                          <p className="text-lg font-black text-orange-600">{matchedItemsCount}/{totalItemsCount}</p>
-                        </div>
-                        <div className={`p-3 rounded-2xl border ${confidenceStyle(extractedData.digitalCompliance?.confidenceScore)}`}>
-                          <p className="text-[8px] font-black uppercase">Conf.</p>
-                          <p className="text-lg font-black">{extractedData.digitalCompliance?.confidenceScore ?? 0}%</p>
-                        </div>
-                      </div>
-                    </div>
-                    {nifMismatch && (
-                      <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-2xl">
-                        <span className="text-red-500 text-lg leading-none shrink-0">⚠</span>
-                        <p className="text-xs font-bold text-red-700">{nifMismatch}</p>
-                      </div>
-                    )}
-                    {qrData && (
-                      <div className={`p-4 rounded-2xl border ${nifMismatch ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700'}`}>
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-widest">QR fiscal</p>
-                            <p className="text-[10px] font-bold opacity-80 mt-1">
-                              Estes dados vêm diretamente do QR da Autoridade Tributária.
-                            </p>
-                          </div>
-                          <span className={`self-start sm:self-auto px-3 py-1.5 rounded-xl text-[9px] font-black uppercase ${nifMismatch ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                            {nifMismatch ? 'NIF comprador inválido' : 'NIF comprador OK'}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-bold">
-                          <p>Fornecedor<br /><span className="font-black">{qrData.supplierNif || '-'}</span></p>
-                          <p>Empresa<br /><span className="font-black">{qrData.customerNif || 'sem NIF'}</span></p>
-                          <p>Documento<br /><span className="font-black">{qrData.documentNumber || '-'}</span></p>
-                          <p>Total QR<br /><span className="font-black">{qrData.totalAmount ? `€ ${qrData.totalAmount.toFixed(2)}` : '-'}</span></p>
-                        </div>
-                      </div>
-                    )}
-                    {currentDocumentType && (
-                      <div className={`p-4 rounded-2xl border ${isCreditDocument ? 'bg-red-50 border-red-200 text-red-700' : 'bg-slate-50 border-slate-100 text-slate-700'}`}>
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-widest">Tipo de documento</p>
-                            <p className="text-[10px] font-bold opacity-80 mt-1">
-                              {isCreditDocument ? 'Nota de crédito detetada. Ao confirmar, o stock será abatido.' : 'Tipo detetado por QR/OCR/número do documento.'}
-                            </p>
-                          </div>
-                          <span className={`px-3 py-1.5 rounded-xl text-sm font-black ${isCreditDocument ? 'bg-red-100 text-red-700' : 'bg-white text-slate-900 border border-slate-200'}`}>
-                            {currentDocumentType}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6">
-                       <div className="space-y-1"><label className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Fornecedor</label><input type="text" className="w-full px-4 sm:px-5 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs" value={supplier} onChange={(e) => setSupplier(e.target.value)} /></div>
-                       <div className="space-y-1"><label className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">NIF</label><input type="text" className="w-full px-4 sm:px-5 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs" value={nif} onChange={(e) => setNif(e.target.value)} /></div>
-                       <div className="space-y-1"><label className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Nº Fatura</label><input type="text" className={`w-full px-4 sm:px-5 py-3 border rounded-xl font-bold text-xs ${isDuplicate ? 'bg-red-50 border-red-500 text-red-600' : 'bg-slate-50 border-slate-200'}`} value={docNumber} onChange={(e) => setDocNumber(e.target.value)} /></div>
-                    </div>
-                    <div className={`hidden sm:flex p-4 rounded-2xl border flex-col sm:flex-row sm:items-center justify-between gap-3 ${confidenceStyle(extractedData.digitalCompliance?.confidenceScore)}`}>
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-widest">Confiança da validação</p>
-                        <p className="text-[10px] font-bold opacity-80 mt-1">
-                          QR {extractedData.qrTotalAmount ? `€ ${extractedData.qrTotalAmount.toFixed(2)}` : 'não verificado'} · Linhas € {(extractedData.calculatedLinesTotal || 0).toFixed(2)}
-                        </p>
-                      </div>
-                      <p className="text-2xl font-black">{extractedData.digitalCompliance?.confidenceScore ?? 0}%</p>
-                    </div>
-                    <div className="space-y-3 sm:space-y-4">
-                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-3 sm:pb-4">Conferência rápida</h5>
-                       <div className="space-y-3 sm:space-y-6">
-                          {extractedData.items.map((item, idx) => {
-                            const isMapped = !!mapping[idx];
-                            const currentFamily = itemFamilies[idx] || 'Outros';
-                            const filteredProducts = products.filter(p => p.category === currentFamily);
-                            const selectedProduct = products.find(p => p.id === mapping[idx]) || autoCreatedProducts[mapping[idx]];
-                            const factor = conversionFactors[idx] || 1;
-                            const stockQty = item.quantity * factor;
-                            const stockActionLabel = isCreditDocument ? 'Abate' : 'Entra';
-                            return (
-                              <div key={idx} className={`p-3 sm:p-6 rounded-2xl sm:rounded-[2rem] border transition-all ${isMapped ? 'bg-white border-slate-100 shadow-sm' : 'bg-orange-50 border-orange-100'}`}>
-                                <div className="flex flex-col md:flex-row gap-3 sm:gap-6">
-                                  <div className="md:w-1/3">
-                                    <div className="flex items-start justify-between gap-3">
-                                      <div className="min-w-0">
-                                        <p className="text-xs font-black text-slate-800 leading-snug">{item.name}</p>
-                                        <p className="text-[10px] font-bold text-slate-400 mt-1">{item.quantity} {item.unit || 'un'} · € {item.totalPrice.toFixed(2)}</p>
-                                      </div>
-                                      <span className={`shrink-0 px-2 py-1 rounded-lg border text-[8px] font-black ${confidenceStyle(matchConfidences[idx])}`}>{matchConfidences[idx] || 0}%</span>
-                                    </div>
-                                  </div>
-                                  <div className="flex-1 space-y-3 sm:space-y-4">
-                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                       <div className="space-y-1"><label className="text-[8px] font-black text-slate-400 uppercase">Família</label><select className="w-full px-3 sm:px-4 py-3 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase outline-none" value={currentFamily} onChange={(e) => { setItemFamilies(prev => ({ ...prev, [idx]: e.target.value })); setMapping(prev => { const n = {...prev}; delete n[idx]; return n; }); }}>{categories.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-                                       <div className="space-y-1 sm:hidden">
-                                         <label className="text-[8px] font-black text-slate-400 uppercase">{stockActionLabel}</label>
-                                         <div className={`px-3 py-3 text-white rounded-xl text-[10px] font-black uppercase ${isCreditDocument ? 'bg-red-700' : 'bg-slate-900'}`}>{stockQty.toFixed(3)} {selectedProduct?.unit || 'un'}</div>
-                                       </div>
-                                     </div>
-                                     <div className="space-y-2"><label className="text-[8px] font-black text-slate-400 uppercase">Inventário</label>
-                                        {isMapped ? (
-                                          <div className="flex items-center gap-2 px-3 sm:px-4 py-3 bg-emerald-50 border border-emerald-100 rounded-xl"><Check className="text-emerald-500 shrink-0" size={16} /><p className="text-[10px] font-black text-emerald-700 uppercase flex-1 leading-snug">{selectedProduct?.name}</p><button onClick={() => setMapping(prev => { const n = {...prev}; delete n[idx]; return n; })} className="text-[8px] font-black text-emerald-500 uppercase hover:text-red-500">Trocar</button></div>
-                                        ) : (
-                                          <div className="flex flex-col sm:flex-row gap-2">
-                                             <select className="flex-1 px-3 sm:px-4 py-3 bg-white border border-orange-200 rounded-xl text-[10px] font-black uppercase outline-none" onChange={(e) => { setMapping(prev => ({ ...prev, [idx]: e.target.value })); setMatchConfidences(prev => ({ ...prev, [idx]: 100 })); }}><option value="">Selecionar Artigo Existente...</option>{filteredProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-                                             <button onClick={async () => {
-                                               const created = await onQuickCreateProduct({ name: item.name, category: currentFamily, unit: unitOriginals[idx] || item.unit || 'un' });
-                                               setMapping(prev => ({ ...prev, [idx]: created.id }));
-                                               setMatchConfidences(prev => ({ ...prev, [idx]: 100 }));
-                                             }} className="px-4 py-3 bg-slate-900 text-white text-[10px] font-black uppercase rounded-xl hover:bg-orange-500 transition-all flex items-center gap-2"><PlusCircle size={14} /> Criar Novo</button>
-                                          </div>
-                                        )}
-                                     </div>
-                                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                                       <div className="space-y-1 hidden sm:block">
-                                         <label className="text-[8px] font-black text-slate-400 uppercase">Unid. Fatura</label>
-                                         <input className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase outline-none" value={unitOriginals[idx] || item.unit || 'un'} onChange={(e) => setUnitOriginals(prev => ({ ...prev, [idx]: e.target.value }))} />
-                                       </div>
-                                       <div className="space-y-1">
-                                         <label className="text-[8px] font-black text-slate-400 uppercase">Fator</label>
-                                         <input type="number" step="0.001" min="0.001" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase outline-none" value={factor} onChange={(e) => setConversionFactors(prev => ({ ...prev, [idx]: Number(e.target.value) || 1 }))} />
-                                       </div>
-                                       <div className="space-y-1">
-                                         <label className="text-[8px] font-black text-slate-400 uppercase">{stockActionLabel} Stock</label>
-                                         <div className={`px-3 py-2 text-white rounded-xl text-[10px] font-black uppercase ${isCreditDocument ? 'bg-red-700' : 'bg-slate-900'}`}>{stockQty.toFixed(3)} {selectedProduct?.unit || 'un'}</div>
-                                       </div>
-                                     </div>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                       </div>
-                    </div>
-                    <div className="sticky bottom-0 z-30 -mx-4 -mb-4 sm:mx-0 sm:mb-0 p-4 sm:p-0 bg-white/95 sm:bg-transparent backdrop-blur border-t sm:border-t pt-4 sm:pt-8 flex flex-col md:flex-row justify-between items-center gap-3 sm:gap-6">
-                       <div className="hidden sm:block"><p className="text-[10px] font-black text-slate-400 uppercase">Total do Documento</p><p className="text-4xl font-black italic text-slate-900">€ {extractedData.totalInvoiceAmount.toFixed(2)}</p></div>
-                       <button onClick={confirmEntry} className={`w-full md:w-auto px-8 sm:px-12 py-4 sm:py-5 rounded-2xl sm:rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate || isSubmitting || nifMismatch ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : isCreditDocument ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-orange-500 text-white hover:bg-orange-600 sm:bg-slate-900 sm:hover:bg-orange-500'}`} disabled={!!(isDuplicate || isSubmitting || nifMismatch)}>
-                         {isSubmitting ? 'A guardar automaticamente...' : isCreditDocument ? 'Confirmar Nota de Crédito' : 'Confirmar Entrada'} {isSubmitting ? <RefreshCcw size={18} className="inline ml-2 animate-spin" /> : <Check size={20} className="inline ml-2" />}
-                       </button>
-                    </div>
-                 </div>
-               </div>
+               <InvoiceReviewPanel
+                 extractedData={extractedData}
+                 matchedItemsCount={matchedItemsCount}
+                 totalItemsCount={totalItemsCount}
+                 nifMismatch={nifMismatch}
+                 qrData={qrData}
+                 currentDocumentType={currentDocumentType}
+                 isCreditDocument={isCreditDocument}
+                 supplier={supplier}
+                 nif={nif}
+                 docNumber={docNumber}
+                 isDuplicate={isDuplicate}
+                 isSubmitting={isSubmitting}
+                 products={products}
+                 categories={categories}
+                 mapping={mapping}
+                 matchConfidences={matchConfidences}
+                 itemFamilies={itemFamilies}
+                 unitOriginals={unitOriginals}
+                 conversionFactors={conversionFactors}
+                 autoCreatedProducts={autoCreatedProducts}
+                 setSupplier={setSupplier}
+                 setNif={setNif}
+                 setDocNumber={setDocNumber}
+                 setMapping={setMapping}
+                 setMatchConfidences={setMatchConfidences}
+                 setItemFamilies={setItemFamilies}
+                 setUnitOriginals={setUnitOriginals}
+                 setConversionFactors={setConversionFactors}
+                 onQuickCreateProduct={onQuickCreateProduct}
+                 confirmEntry={confirmEntry}
+               />
              ) : (
                <div className="h-full flex flex-col items-center justify-center text-slate-300 py-32 space-y-6 text-center">
                  {isProcessing ? (
@@ -1122,7 +617,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         </div>
       )}
 
-      {cameraOverlay && createPortal(cameraOverlay, document.body)}
+      {camera.isCameraOpen && createPortal(<CameraOverlay {...camera.overlayProps} />, document.body)}
     </div>
   );
 };
