@@ -134,32 +134,36 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const prepareOcrPagesForAi = async (sourcePages: string[], forceDetailSlices = false) => {
     const ocrPages: string[] = [];
     for (const page of sourcePages) {
-      const dataUrl = page.startsWith('data:') ? page : `data:image/jpeg;base64,${page}`;
-      const { width, height, image } = await imageSizeFromDataUrl(dataUrl);
-      const ratio = height / Math.max(1, width);
-      if (ratio <= 2.15 && !forceDetailSlices) {
-        ocrPages.push(dataUrl);
-        continue;
-      }
+      try {
+        const dataUrl = page.startsWith('data:') ? page : `data:image/jpeg;base64,${page}`;
+        const { width, height, image } = await imageSizeFromDataUrl(dataUrl);
+        const ratio = height / Math.max(1, width);
+        if (ratio <= 2.15 && !forceDetailSlices) {
+          ocrPages.push(dataUrl);
+          continue;
+        }
 
-      ocrPages.push(dataUrl);
-      // Talões compridos e A4 fotografado de longe ficam bons para arquivo, mas as linhas
-      // podem chegar pequenas à IA. Mantemos a foto original e enviamos close-ups só para OCR.
-      const sliceHeight = ratio > 2.15 ? Math.round(width * 1.65) : Math.round(height * 0.42);
-      const overlap = Math.round(sliceHeight * 0.18);
-      const step = Math.max(1, sliceHeight - overlap);
-      const maxSlices = ratio > 2.15 ? 6 : 4;
-      let sliceCount = 0;
-      for (let y = 0; y < height && sliceCount < maxSlices; y += step) {
-        const h = Math.min(sliceHeight, height - y);
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(image, 0, y, width, h, 0, 0, width, h);
-        ocrPages.push(canvas.toDataURL('image/jpeg', 0.9));
-        sliceCount += 1;
-        if (y + h >= height) break;
+        ocrPages.push(dataUrl);
+        // Talões compridos e A4 fotografado de longe ficam bons para arquivo, mas as linhas
+        // podem chegar pequenas à IA. Mantemos a foto original e enviamos close-ups só para OCR.
+        const sliceHeight = ratio > 2.15 ? Math.round(width * 1.65) : Math.round(height * 0.42);
+        const overlap = Math.round(sliceHeight * 0.18);
+        const step = Math.max(1, sliceHeight - overlap);
+        const maxSlices = ratio > 2.15 ? 6 : 4;
+        let sliceCount = 0;
+        for (let y = 0; y < height && sliceCount < maxSlices; y += step) {
+          const h = Math.min(sliceHeight, height - y);
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(image, 0, y, width, h, 0, 0, width, h);
+          ocrPages.push(canvas.toDataURL('image/jpeg', 0.9));
+          sliceCount += 1;
+          if (y + h >= height) break;
+        }
+      } catch {
+        continue;
       }
     }
     return ocrPages.length > 0 ? ocrPages : sourcePages;
@@ -463,6 +467,11 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         }
         const nifErr = checkQrBuyerNif(parsedQr);
         setNifMismatch(nifErr);
+        if (nifErr) {
+          setProcessingError(`${nifErr}. Não é possível analisar esta fatura.`);
+          setIsProcessing(false);
+          return;
+        }
       }
       await processAllPages(updatedOriginals, updatedQrPayloads);
     } catch (error) {
@@ -502,10 +511,6 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     const updatedOriginals = [...originalPages, `data:image/jpeg;base64,${archivePage}`];
     const newQrPayloads = await scanQrPayloads([normalized.data]);
     const updatedQrPayloads = [...qrPayloads, ...newQrPayloads];
-    setPages(updated);
-    setOriginalPages(updatedOriginals);
-    setQrPayloads(updatedQrPayloads);
-    setPageQualities(prev => [...prev, { ...normalized.quality, hasQrCode: Boolean(newQrPayloads[0]) }]);
 
     // NIF check immediately after capture — before calling Gemini
     if (updatedQrPayloads.length > 0) {
@@ -516,9 +521,18 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       }
       const nifErr = checkQrBuyerNif(parsedQr);
       setNifMismatch(nifErr);
+      if (nifErr) {
+        setCameraError(`${nifErr}. Não é possível analisar esta fatura.`);
+        return;
+      }
     } else {
       setNifMismatch(null);
     }
+
+    setPages(updated);
+    setOriginalPages(updatedOriginals);
+    setQrPayloads(updatedQrPayloads);
+    setPageQualities(prev => [...prev, { ...normalized.quality, hasQrCode: Boolean(newQrPayloads[0]) }]);
 
     const isLong = normalized.width > 0 && (normalized.height / normalized.width) > 2.5;
     const newPartCount = capturedParts + 1;
@@ -572,6 +586,15 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
 
   const confirmEntry = async () => {
     if (isSubmitting) return;
+    if (nifMismatch) {
+      setProcessingError(`${nifMismatch}. Não é possível registar esta fatura.`);
+      return;
+    }
+    const unreadablePage = pageQualities.find(page => !page.isReadable);
+    if (unreadablePage) {
+      setProcessingError(qualityErrorMessage(unreadablePage));
+      return;
+    }
     if (extractedData && !isDuplicate) {
       setIsSubmitting(true);
       const completeMapping = { ...mapping };
@@ -632,6 +655,8 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
       }
     }
   };
+  const confirmEntryRef = useRef(confirmEntry);
+  useEffect(() => { confirmEntryRef.current = confirmEntry; });
 
   const cameraOverlay = isCameraOpen ? (
     <div
@@ -810,13 +835,14 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
     !isProcessing &&
     !isSubmitting &&
     !isDuplicate &&
-    !nifMismatch
+    !nifMismatch &&
+    !isCreditDocument
   );
 
   useEffect(() => {
     if (!autoAcceptReady || autoSubmitRef.current) return;
     autoSubmitRef.current = true;
-    confirmEntry();
+    confirmEntryRef.current();
   }, [autoAcceptReady]);
 
   return (
@@ -1057,7 +1083,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                     </div>
                     <div className="sticky bottom-0 z-30 -mx-4 -mb-4 sm:mx-0 sm:mb-0 p-4 sm:p-0 bg-white/95 sm:bg-transparent backdrop-blur border-t sm:border-t pt-4 sm:pt-8 flex flex-col md:flex-row justify-between items-center gap-3 sm:gap-6">
                        <div className="hidden sm:block"><p className="text-[10px] font-black text-slate-400 uppercase">Total do Documento</p><p className="text-4xl font-black italic text-slate-900">€ {extractedData.totalInvoiceAmount.toFixed(2)}</p></div>
-                       <button onClick={confirmEntry} className={`w-full md:w-auto px-8 sm:px-12 py-4 sm:py-5 rounded-2xl sm:rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate || isSubmitting ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : isCreditDocument ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-orange-500 text-white hover:bg-orange-600 sm:bg-slate-900 sm:hover:bg-orange-500'}`} disabled={!!(isDuplicate || isSubmitting)}>
+                       <button onClick={confirmEntry} className={`w-full md:w-auto px-8 sm:px-12 py-4 sm:py-5 rounded-2xl sm:rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-all ${isDuplicate || isSubmitting || nifMismatch ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : isCreditDocument ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-orange-500 text-white hover:bg-orange-600 sm:bg-slate-900 sm:hover:bg-orange-500'}`} disabled={!!(isDuplicate || isSubmitting || nifMismatch)}>
                          {isSubmitting ? 'A guardar automaticamente...' : isCreditDocument ? 'Confirmar Nota de Crédito' : 'Confirmar Entrada'} {isSubmitting ? <RefreshCcw size={18} className="inline ml-2 animate-spin" /> : <Check size={20} className="inline ml-2" />}
                        </button>
                     </div>
