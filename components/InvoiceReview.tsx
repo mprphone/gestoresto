@@ -20,6 +20,7 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
   const [marking, setMarking] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedGuiaId, setExpandedGuiaId] = useState<string | null>(null);
   const [expenseCategories, setExpenseCategories] = useState<Array<{ id: string; name: string }>>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [reviewLines, setReviewLines] = useState<Record<string, ReviewInvoiceLine[]>>({});
@@ -208,9 +209,15 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
           {guias.map(guia => {
             const isExit = guia.movement_type === 'SAIDA';
             const isBusy = marking[guia.guia_id];
+            const isExpanded = expandedGuiaId === guia.guia_id;
+            const hasPhotos = guia.items.some(i => i.photo_url);
             return (
               <div key={guia.guia_id} className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
-                <div className="p-5 flex items-start gap-4">
+                {/* Header — clickable to expand */}
+                <div
+                  className="p-5 flex items-start gap-4 cursor-pointer hover:bg-slate-50 transition-colors"
+                  onClick={() => setExpandedGuiaId(isExpanded ? null : guia.guia_id)}
+                >
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${isExit ? 'bg-blue-50' : 'bg-red-50'}`}>
                     {isExit ? <ArrowRightLeft size={18} className="text-blue-500" /> : <Trash2 size={18} className="text-red-500" />}
                   </div>
@@ -220,39 +227,73 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
                         <p className="font-black text-slate-900">{isExit ? 'Saída de Stock' : 'Registo de Quebra'}</p>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mt-0.5">
                           {new Date(guia.created_at).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          {hasPhotos && <span className="ml-2 text-slate-300">· fotos disponíveis ↓</span>}
                         </p>
                       </div>
                       <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-lg shrink-0 ${isExit ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'}`}>
                         {guia.item_count} artigo{guia.item_count !== 1 ? 's' : ''}
                       </span>
                     </div>
-                    <div className="space-y-1 mb-3">
+                    <div className="space-y-1">
                       {guia.items.map(item => (
                         <div key={item.id} className="flex items-center gap-2 text-xs font-bold text-slate-700">
                           <span className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" />
                           <span className="truncate">{item.name}</span>
-                          <span className="text-slate-400 shrink-0">{item.quantity} {item.unit}</span>
+                          <span className="text-slate-400 shrink-0 font-black">{item.quantity} {item.unit}</span>
                         </div>
                       ))}
                     </div>
-                    <div className="flex items-center gap-2">
+                  </div>
+                </div>
+
+                {/* Expanded — photos + approve/reject */}
+                {isExpanded && (
+                  <div className="border-t border-slate-100 p-5 space-y-4 bg-slate-50/60">
+                    {hasPhotos && (
+                      <div className="space-y-3">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Fotos de confirmação</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                          {guia.items.filter(i => i.photo_url).map(item => (
+                            <div key={item.id} className="space-y-1">
+                              <img
+                                src={item.photo_url}
+                                alt={item.name}
+                                className="w-full aspect-[4/3] object-cover rounded-xl border border-slate-200"
+                              />
+                              <p className="text-[9px] font-bold text-slate-500 truncate text-center">{item.name} · {item.quantity} {item.unit}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {!hasPhotos && (
+                      <p className="text-xs text-slate-400 font-bold italic text-center py-2">Sem fotos de confirmação</p>
+                    )}
+                    <div className="flex items-center gap-2 pt-1">
                       <button
                         onClick={() => handleGuiaReviewed(guia, false)}
                         disabled={isBusy}
-                        className="flex items-center gap-1.5 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-[10px] font-black uppercase transition-colors disabled:opacity-40"
+                        className="flex items-center gap-1.5 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-[10px] font-black uppercase transition-colors disabled:opacity-40"
                       >
-                        <X size={12} /> Rejeitar
+                        <X size={13} /> Rejeitar
                       </button>
                       <button
                         onClick={() => handleGuiaReviewed(guia, true)}
                         disabled={isBusy}
-                        className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase transition-colors disabled:opacity-40"
+                        className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase transition-colors disabled:opacity-40"
                       >
-                        <Check size={12} /> Aprovar
+                        <Check size={13} /> Aprovar guia
                       </button>
                     </div>
                   </div>
-                </div>
+                )}
+
+                {/* Collapsed quick-approve button */}
+                {!isExpanded && (
+                  <div className="px-5 pb-4 flex justify-end">
+                    <span className="text-[9px] font-bold text-slate-400">toca para ver detalhes e aprovar</span>
+                  </div>
+                )}
               </div>
             );
           })}

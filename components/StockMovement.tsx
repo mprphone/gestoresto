@@ -67,11 +67,28 @@ const StockMovement: React.FC<StockMovementProps> = ({ products, movements, cate
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setTempPhoto(reader.result as string);
-      reader.readAsDataURL(file);
-    }
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const photoData = reader.result as string;
+      const qty = parseFloat(tempQty);
+      // If qty is already filled, auto-add immediately — no extra click needed
+      if (!isNaN(qty) && qty > 0 && selectedProduct) {
+        if (movementType !== MovementType.ENTRY && !hideStock && selectedProduct.currentStock < qty) {
+          alert('Stock insuficiente!');
+          setTempPhoto(photoData);
+          return;
+        }
+        setCart(prev => [...prev, { productId: selectedProduct.id, name: selectedProduct.name, qty, unit: selectedProduct.unit, photoUrl: photoData }]);
+        setTempQty('');
+        setTempPhoto(null);
+        setSelectedProduct(null);
+        setStep('CATEGORY');
+      } else {
+        setTempPhoto(photoData); // qty not filled yet — show photo, user fills manually
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const addItemToCart = () => {
