@@ -1,10 +1,10 @@
 
 import React, { useState, useRef } from 'react';
 import { Product, MovementType, Category, Movement } from '../types';
-import { 
-  ShoppingCart, 
-  Trash2, 
-  Plus, 
+import {
+  ShoppingCart,
+  Trash2,
+  Plus,
   ArrowRightLeft,
   ChevronRight,
   Beef,
@@ -19,7 +19,8 @@ import {
   Eye,
   Scale,
   Camera,
-  X
+  X,
+  Search
 } from 'lucide-react';
 
 interface StockMovementProps {
@@ -49,7 +50,12 @@ const StockMovement: React.FC<StockMovementProps> = ({ products, movements, cate
   const [cart, setCart] = useState<{ productId: string, name: string, qty: number, unit: string, photoUrl?: string }[]>([]);
   const [tempQty, setTempQty] = useState<string>('');
   const [tempPhoto, setTempPhoto] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const searchResults = search.trim()
+    ? products.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+    : [];
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -79,6 +85,14 @@ const StockMovement: React.FC<StockMovementProps> = ({ products, movements, cate
     setCart([]);
     setIsCreating(false);
     setStep('TYPE');
+    setSearch('');
+  };
+
+  const selectProductFromSearch = (p: Product) => {
+    setSelectedProduct(p);
+    if (step === 'TYPE') setMovementType(MovementType.EXIT);
+    setStep('ENTRY');
+    setSearch('');
   };
 
   if (!isCreating) {
@@ -122,72 +136,115 @@ const StockMovement: React.FC<StockMovementProps> = ({ products, movements, cate
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start animate-in slide-in-from-bottom-4">
       <div className="lg:col-span-8 bg-white p-8 rounded-[3rem] shadow-sm border border-slate-200 min-h-[500px]">
+        {/* Search bar — always visible, bypasses TIPO/FAMÍLIA steps */}
+        <div className="relative mb-6">
+          <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Pesquisar artigo pelo nome..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-300"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors">
+              <X size={15} />
+            </button>
+          )}
+        </div>
+
+        {/* Search results — override step content when typing */}
+        {searchResults.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6 max-h-[420px] overflow-y-auto no-scrollbar">
+            {searchResults.map(p => (
+              <button key={p.id} onClick={() => selectProductFromSearch(p)}
+                className="p-4 bg-white border border-slate-200 rounded-2xl flex justify-between items-center hover:border-orange-400 hover:shadow-md transition-all text-left">
+                <div className="min-w-0">
+                  <p className="font-black text-slate-800 truncate">{p.name}</p>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">
+                    {p.category}{!hideStock ? ` · ${p.currentStock} ${p.unit}` : ` · ${p.unit}`}
+                  </p>
+                </div>
+                <ChevronRight size={16} className="text-slate-300 shrink-0 ml-2" />
+              </button>
+            ))}
+          </div>
+        )}
+        {search && searchResults.length === 0 && (
+          <p className="text-sm text-slate-400 font-bold text-center py-6 mb-4">Nenhum artigo encontrado para "{search}"</p>
+        )}
+
+        {/* Step tabs — hidden while searching */}
+        {!search && (
         <div className="flex items-center gap-2 mb-8 overflow-x-auto pb-2 no-scrollbar">
           <button onClick={() => setStep('TYPE')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${step === 'TYPE' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'}`}>Tipo</button>
           <button disabled={step === 'TYPE'} onClick={() => setStep('CATEGORY')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${step === 'CATEGORY' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'}`}>Família</button>
           <button disabled={step !== 'ENTRY'} onClick={() => setStep('PRODUCT')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${step === 'PRODUCT' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'}`}>Artigo</button>
         </div>
-
-        {step === 'TYPE' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <button onClick={() => { setMovementType(MovementType.EXIT); setStep('CATEGORY'); }} className="p-10 bg-slate-50 border-2 border-transparent hover:border-slate-900 rounded-[2.5rem] transition-all text-center">
-              <ShoppingCart size={32} className="mx-auto mb-4" />
-              <h4 className="font-black text-xl">Reposição Balcão</h4>
-              <p className="text-slate-500 text-sm mt-2">Saída para consumo cozinha/bar.</p>
-            </button>
-            <button onClick={() => { setMovementType(MovementType.WASTE); setStep('CATEGORY'); }} className="p-10 bg-red-50 border-2 border-transparent hover:border-red-500 rounded-[2.5rem] transition-all text-center">
-              <Trash2 size={32} className="mx-auto mb-4 text-red-600" />
-              <h4 className="font-black text-xl text-red-600">Registo de Quebra</h4>
-              <p className="text-red-400 text-sm mt-2">Desperdício ou danos.</p>
-            </button>
-          </div>
         )}
 
-        {step === 'CATEGORY' && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            {categories.map(cat => (
-              <button key={cat} onClick={() => { setSelectedCategory(cat); setStep('PRODUCT'); }} className="p-6 bg-slate-50 rounded-3xl hover:bg-white hover:shadow-xl transition-all border border-transparent hover:border-slate-100 flex flex-col items-center">
-                <div className="p-4 bg-white rounded-2xl mb-4 text-orange-500">{getCategoryIcon(cat)}</div>
-                <span className="font-black text-[10px] uppercase tracking-wider">{cat}</span>
+        {!search && <>
+          {step === 'TYPE' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <button onClick={() => { setMovementType(MovementType.EXIT); setStep('CATEGORY'); }} className="p-10 bg-slate-50 border-2 border-transparent hover:border-slate-900 rounded-[2.5rem] transition-all text-center">
+                <ShoppingCart size={32} className="mx-auto mb-4" />
+                <h4 className="font-black text-xl">Reposição Balcão</h4>
+                <p className="text-slate-500 text-sm mt-2">Saída para consumo cozinha/bar.</p>
               </button>
-            ))}
-          </div>
-        )}
+              <button onClick={() => { setMovementType(MovementType.WASTE); setStep('CATEGORY'); }} className="p-10 bg-red-50 border-2 border-transparent hover:border-red-500 rounded-[2.5rem] transition-all text-center">
+                <Trash2 size={32} className="mx-auto mb-4 text-red-600" />
+                <h4 className="font-black text-xl text-red-600">Registo de Quebra</h4>
+                <p className="text-red-400 text-sm mt-2">Desperdício ou danos.</p>
+              </button>
+            </div>
+          )}
 
-        {step === 'PRODUCT' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {products.filter(p => p.category === selectedCategory).map(p => (
-              <button key={p.id} onClick={() => { setSelectedProduct(p); setStep('ENTRY'); }} className="p-5 bg-white border border-slate-200 rounded-2xl flex justify-between items-center hover:border-slate-900 transition-all text-left">
-                <div>
-                  <p className="font-black text-slate-800">{p.name}</p>
-                  {!hideStock && <p className="text-[10px] text-slate-400 font-bold uppercase">Disponível: {p.currentStock} {p.unit}</p>}
-                  {hideStock && <p className="text-[10px] text-slate-400 font-bold uppercase">{p.unit}</p>}
+          {step === 'CATEGORY' && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              {categories.map(cat => (
+                <button key={cat} onClick={() => { setSelectedCategory(cat); setStep('PRODUCT'); }} className="p-6 bg-slate-50 rounded-3xl hover:bg-white hover:shadow-xl transition-all border border-transparent hover:border-slate-100 flex flex-col items-center">
+                  <div className="p-4 bg-white rounded-2xl mb-4 text-orange-500">{getCategoryIcon(cat)}</div>
+                  <span className="font-black text-[10px] uppercase tracking-wider">{cat}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {step === 'PRODUCT' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {products.filter(p => p.category === selectedCategory).map(p => (
+                <button key={p.id} onClick={() => { setSelectedProduct(p); setStep('ENTRY'); }} className="p-5 bg-white border border-slate-200 rounded-2xl flex justify-between items-center hover:border-slate-900 transition-all text-left">
+                  <div>
+                    <p className="font-black text-slate-800">{p.name}</p>
+                    {!hideStock && <p className="text-[10px] text-slate-400 font-bold uppercase">Disponível: {p.currentStock} {p.unit}</p>}
+                    {hideStock && <p className="text-[10px] text-slate-400 font-bold uppercase">{p.unit}</p>}
+                  </div>
+                  <ChevronRight size={18} className="text-slate-300" />
+                </button>
+              ))}
+            </div>
+          )}
+
+          {step === 'ENTRY' && selectedProduct && (
+            <div className="max-w-md mx-auto text-center space-y-8">
+              <h4 className="text-2xl font-black text-slate-800">{selectedProduct.name}</h4>
+              <div className="space-y-6">
+                <div className="relative">
+                  <Scale className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300" size={24} />
+                  <input type="number" className="w-full pl-16 pr-8 py-6 bg-slate-50 border-2 border-slate-100 rounded-[2rem] text-3xl font-black outline-none" placeholder="0.00" value={tempQty} onChange={(e) => setTempQty(e.target.value)} />
                 </div>
-                <ChevronRight size={18} className="text-slate-300" />
-              </button>
-            ))}
-          </div>
-        )}
-
-        {step === 'ENTRY' && selectedProduct && (
-          <div className="max-w-md mx-auto text-center space-y-8">
-            <h4 className="text-2xl font-black text-slate-800">{selectedProduct.name}</h4>
-            <div className="space-y-6">
-              <div className="relative">
-                <Scale className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300" size={24} />
-                <input type="number" className="w-full pl-16 pr-8 py-6 bg-slate-50 border-2 border-slate-100 rounded-[2rem] text-3xl font-black outline-none" placeholder="0.00" value={tempQty} onChange={(e) => setTempQty(e.target.value)} />
-              </div>
-              <div className="relative border-2 border-dashed border-slate-200 rounded-[2rem] aspect-video flex flex-col items-center justify-center bg-slate-50 cursor-pointer overflow-hidden" onClick={() => fileInputRef.current?.click()}>
-                {tempPhoto ? <img src={tempPhoto} className="w-full h-full object-cover" /> : <><Camera size={40} className="text-slate-300 mb-2"/><span className="text-[10px] font-black text-slate-400 uppercase">Foto do Peso</span></>}
-                <input type="file" accept="image/*" capture="environment" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
-              </div>
-              <div className="flex gap-4">
-                <button onClick={() => setStep('PRODUCT')} className="flex-1 py-5 font-black text-slate-400 uppercase text-[10px]">Voltar</button>
-                <button disabled={!tempQty} onClick={addItemToCart} className="flex-[2] bg-slate-900 text-white py-5 rounded-2xl font-black uppercase text-xs shadow-xl active:scale-95 disabled:opacity-30">Adicionar à Guia</button>
+                <div className="relative border-2 border-dashed border-slate-200 rounded-[2rem] aspect-video flex flex-col items-center justify-center bg-slate-50 cursor-pointer overflow-hidden" onClick={() => fileInputRef.current?.click()}>
+                  {tempPhoto ? <img src={tempPhoto} className="w-full h-full object-cover" /> : <><Camera size={40} className="text-slate-300 mb-2"/><span className="text-[10px] font-black text-slate-400 uppercase">Foto do Peso</span></>}
+                  <input type="file" accept="image/*" capture="environment" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+                </div>
+                <div className="flex gap-4">
+                  <button onClick={() => setStep('PRODUCT')} className="flex-1 py-5 font-black text-slate-400 uppercase text-[10px]">Voltar</button>
+                  <button disabled={!tempQty} onClick={addItemToCart} className="flex-[2] bg-slate-900 text-white py-5 rounded-2xl font-black uppercase text-xs shadow-xl active:scale-95 disabled:opacity-30">Adicionar à Guia</button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </>}
       </div>
 
       <div className="lg:col-span-4 sticky top-28">
