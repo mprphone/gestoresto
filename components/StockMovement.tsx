@@ -23,11 +23,19 @@ import {
   Search
 } from 'lucide-react';
 
+export interface CartItem {
+  productId: string;
+  name: string;
+  qty: number;
+  unit: string;
+  photoUrl?: string;
+}
+
 interface StockMovementProps {
   products: Product[];
   movements: Movement[];
   categories: Category[];
-  onTransfer: (productId: string, qty: number, type: MovementType, photoUrl?: string) => void;
+  onFinalize: (cart: CartItem[], movementType: MovementType) => Promise<void>;
   hideStock?: boolean;
 }
 
@@ -41,7 +49,7 @@ const getCategoryIcon = (cat: string) => {
   return <Layers size={20} />;
 };
 
-const StockMovement: React.FC<StockMovementProps> = ({ products, movements, categories, onTransfer, hideStock = false }) => {
+const StockMovement: React.FC<StockMovementProps> = ({ products, movements, categories, onFinalize, hideStock = false }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [step, setStep] = useState<'TYPE' | 'CATEGORY' | 'PRODUCT' | 'ENTRY'>('TYPE');
   const [movementType, setMovementType] = useState<MovementType>(MovementType.EXIT);
@@ -80,12 +88,20 @@ const StockMovement: React.FC<StockMovementProps> = ({ products, movements, cate
     setStep('CATEGORY'); 
   };
 
-  const handleFinalize = () => {
-    cart.forEach(item => onTransfer(item.productId, item.qty, movementType, item.photoUrl));
-    setCart([]);
-    setIsCreating(false);
-    setStep('TYPE');
-    setSearch('');
+  const [finalizing, setFinalizing] = useState(false);
+
+  const handleFinalize = async () => {
+    if (finalizing || cart.length === 0) return;
+    setFinalizing(true);
+    try {
+      await onFinalize(cart, movementType);
+      setCart([]);
+      setIsCreating(false);
+      setStep('TYPE');
+      setSearch('');
+    } finally {
+      setFinalizing(false);
+    }
   };
 
   const selectProductFromSearch = (p: Product) => {
@@ -262,7 +278,9 @@ const StockMovement: React.FC<StockMovementProps> = ({ products, movements, cate
               </div>
             ))}
           </div>
-          <button disabled={cart.length === 0} onClick={handleFinalize} className="w-full bg-white text-slate-900 py-6 rounded-3xl font-black uppercase text-xs shadow-lg hover:bg-orange-500 hover:text-white transition-all disabled:opacity-20 active:scale-95">Finalizar Guia</button>
+          <button disabled={cart.length === 0 || finalizing} onClick={handleFinalize} className="w-full bg-white text-slate-900 py-6 rounded-3xl font-black uppercase text-xs shadow-lg hover:bg-orange-500 hover:text-white transition-all disabled:opacity-20 active:scale-95">
+            {finalizing ? 'A enviar…' : 'Finalizar e Enviar para Aprovação'}
+          </button>
           <button onClick={() => setIsCreating(false)} className="w-full py-4 text-white/40 text-[10px] font-black uppercase mt-4">Cancelar</button>
         </div>
       </div>

@@ -6,14 +6,14 @@ import { listSuppliersPage } from './data/suppliersRepository';
 import { listInvoicesPage, listInvoiceLines, createInvoiceWithLines } from './data/invoicesRepository';
 import { listAliasesForSupplier } from './data/productAliasesRepository';
 import { deleteUnlinkedArchiveDocument, listArchiveDocumentsForInvoice, uploadArchiveDocument } from './data/archiveRepository';
-import { listMovementsPage, createMovement } from './data/movementsRepository';
+import { listMovementsPage, createMovementGuia } from './data/movementsRepository';
 import { createBatchPayment, listPayments } from './data/paymentsRepository';
 import { getRestaurantProfile, saveRestaurantProfile } from './data/restaurantProfileRepository';
 import { getUserContext, listUsers, login, saveUser } from './data/authRepository';
 import Dashboard from './components/Dashboard';
 import InventoryList from './components/InventoryList';
 import StockEntry from './components/StockEntry';
-import StockMovement from './components/StockMovement';
+import StockMovement, { CartItem } from './components/StockMovement';
 import Reports from './components/Reports';
 import AlertsPanel from './components/AlertsPanel';
 import ProductCatalog from './components/ProductCatalog';
@@ -27,7 +27,7 @@ import Expenses from './components/Expenses';
 import CompanyAdmin from './components/CompanyAdmin';
 import RestaurantSelector from './components/RestaurantSelector';
 import UserMenu from './components/UserMenu';
-import { listPendingInvoices, subscribePush, getVapidPublicKey } from './data/reviewRepository';
+import { listPendingInvoices, listPendingGuias, subscribePush, getVapidPublicKey } from './data/reviewRepository';
 import { switchRestaurant } from './data/companiesRepository';
 import { setAuthRestaurant, getAuthRestaurant } from './data/apiClient';
 import {
@@ -201,8 +201,8 @@ const App: React.FC = () => {
     }
     let cancelled = false;
     setPendingReviewCount(0);
-    const refresh = () => listPendingInvoices()
-      .then(list => { if (!cancelled) setPendingReviewCount(list.length); })
+    const refresh = () => Promise.all([listPendingInvoices(), listPendingGuias()])
+      .then(([inv, g]) => { if (!cancelled) setPendingReviewCount(inv.length + g.length); })
       .catch(() => { if (!cancelled) setPendingReviewCount(0); });
     refresh();
     const interval = setInterval(refresh, 60_000);
@@ -410,18 +410,14 @@ const App: React.FC = () => {
     }, 'Funcionário guardado.');
   };
 
-  const handleStockMovement = async (productId: string, qty: number, type: MovementType, photoUrl?: string) => {
-    const product = products.find(p => p.id === productId);
-    if (!product) return;
-
-    if (type !== MovementType.ENTRY && product.currentStock < qty) {
-      alert(`Erro: Stock insuficiente de ${product.name}!`);
-      return;
-    }
+  const handleMovementGuia = async (cart: CartItem[], movementType: MovementType) => {
     await runAction(async () => {
-      await createMovement({ productId, type, quantity: qty, price: product.averagePrice, photoUrl });
+      await createMovementGuia(
+        cart.map(item => ({ productId: item.productId, quantity: item.qty, photoUrl: item.photoUrl })),
+        movementType
+      );
       await refreshData();
-    }, 'Movimento guardado.');
+    }, 'Guia enviada para aprovação do administrador.');
   };
 
   const handleMarkAsPaid = async (
@@ -579,7 +575,7 @@ const App: React.FC = () => {
           {activeTab === 'dash' && <Dashboard products={products} movements={movements} />}
           {activeTab === 'inv' && <InventoryList products={products} movements={movements} categories={categories} onUpdateProduct={handleUpdateProduct} />}
           {activeTab === 'entry' && <StockEntry products={products} suppliers={suppliers} invoices={invoices} productAliases={productAliases} onComplete={handleStockEntry} onQuickCreateProduct={handleCreateProduct} categories={categories} restaurantProfile={activeRestaurantProfile} />}
-          {activeTab === 'move' && <StockMovement products={products} movements={movements} onTransfer={handleStockMovement} categories={categories} hideStock={isFuncionario} />}
+          {activeTab === 'move' && <StockMovement products={products} movements={movements} onFinalize={handleMovementGuia} categories={categories} hideStock={isFuncionario} />}
           {activeTab === 'review' && currentUser && currentRestaurant && (
             <InvoiceReview
               key={currentRestaurant.id}

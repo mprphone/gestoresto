@@ -1,6 +1,15 @@
 import { query, withTransaction } from './db.js';
 
 export async function runMigrations() {
+  // ── 0a. Movements guia review columns ───────────────────────────────────────
+  const movementColMigrations = [
+    `do $$ begin if not exists (select 1 from information_schema.columns where table_name='movements' and column_name='guia_id') then alter table movements add column guia_id uuid; end if; end $$`,
+    `do $$ begin if not exists (select 1 from information_schema.columns where table_name='movements' and column_name='requires_review') then alter table movements add column requires_review boolean not null default false; end if; end $$`,
+    `do $$ begin if not exists (select 1 from information_schema.columns where table_name='movements' and column_name='reviewed_at') then alter table movements add column reviewed_at timestamptz; end if; end $$`,
+    `do $$ begin if not exists (select 1 from information_schema.columns where table_name='movements' and column_name='reviewed_by') then alter table movements add column reviewed_by uuid; end if; end $$`,
+  ];
+  for (const sql of movementColMigrations) await query(sql).catch(() => {});
+
   // ── 0. Enum additions ────────────────────────────────────────────────────────
   await query(`
     do $$ begin

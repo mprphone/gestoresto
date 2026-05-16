@@ -33,3 +33,16 @@ export async function createMovement(input: {
   const row = await apiPost<any>('/api/movements', input);
   return fromDb(row);
 }
+
+export async function createMovementGuia(
+  items: { productId: string; quantity: number; photoUrl?: string }[],
+  movementType: MovementType,
+  guiaId?: string
+): Promise<string> {
+  const result = await apiPost<{ guiaId: string }>('/api/movements/guia', {
+    items,
+    movementType,
+    guiaId: guiaId || crypto.randomUUID()
+  });
+  return result.guiaId;
+}

@@ -421,3 +421,64 @@ reviewRouter.post('/:id/expense-category', async (req, res, next) => {
     next(err);
   }
 });
+
+// GET /api/review/pending-guias — movement batches pending admin review
+reviewRouter.get('/pending-guias', async (req, res, next) => {
+  try {
+    const result = await query(`
+      select
+        m.guia_id,
+        m.type as movement_type,
+        min(m.date_moved) as created_at,
+        count(m.id)::int as item_count,
+        json_agg(json_build_object(
+          'id', m.id,
+          'product_id', m.product_id,
+          'name', p.name,
+          'quantity', m.quantity,
+          'unit', p.unit,
+          'photo_url', m.photo_url
+        ) order by m.date_moved) as items
+      from movements m
+      join products p on p.id = m.product_id
+      where m.requires_review = true
+        and m.reviewed_at is null
+        and m.restaurant_id = $1
+      group by m.guia_id, m.type
+      order by created_at desc
+    `, [req.restaurantId]);
+    res.json({ data: result.rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/review/guias/:guiaId/reviewed — approve a movement batch
+reviewRouter.post('/guias/:guiaId/reviewed', async (req, res, next) => {
+  try {
+    const { userId } = req.body;
+    await query(`
+      update movements
+      set reviewed_at = now(), reviewed_by = $2
+      where guia_id = $1 and restaurant_id = $3
+    `, [req.params.guiaId, userId || null, req.restaurantId]);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/review/guias/:guiaId/rejected — reject and reverse a movement batch
+reviewRouter.post('/guias/:guiaId/rejected', async (req, res, next) => {
+  try {
+    const { userId } = req.body;
+    await query(`
+      update movements
+      set reviewed_at = now(), reviewed_by = $2, requires_review = false, notes = coalesce(notes, '') || ' [REJEITADO]'
+      where guia_id = $1 and restaurant_id = $3
+    `, [req.params.guiaId, userId || null, req.restaurantId]);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, Clock, RefreshCcw, FileText, AlertTriangle, Check, X, ChevronUp, Save } from 'lucide-react';
-import { PendingInvoice, ReviewInvoiceLine, listPendingInvoices, listReviewInvoiceLines, markReviewed, markUnreviewed, updateReviewExpenseCategory, updateReviewInvoiceLine } from '../data/reviewRepository';
+import { CheckCircle, Clock, RefreshCcw, FileText, AlertTriangle, Check, X, ChevronUp, Save, ArrowRightLeft, Trash2 } from 'lucide-react';
+import { PendingInvoice, PendingGuia, ReviewInvoiceLine, listPendingInvoices, listPendingGuias, listReviewInvoiceLines, markReviewed, markUnreviewed, markGuiaReviewed, markGuiaRejected, updateReviewExpenseCategory, updateReviewInvoiceLine } from '../data/reviewRepository';
 import { listProductsPage } from '../data/productsRepository';
 import { apiGet } from '../data/apiClient';
 import { AppUser, Product } from '../types';
@@ -15,6 +15,7 @@ interface InvoiceReviewProps {
 
 const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId, onReviewed }) => {
   const [invoices, setInvoices] = useState<PendingInvoice[]>([]);
+  const [guias, setGuias] = useState<PendingGuia[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [marking, setMarking] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -28,9 +29,11 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
     setIsLoading(true);
     setError(null);
     try {
-      setInvoices(await listPendingInvoices());
+      const [inv, g] = await Promise.all([listPendingInvoices(), listPendingGuias()]);
+      setInvoices(inv);
+      setGuias(g);
     } catch (e: any) {
-      setError(e.message || 'Erro ao carregar faturas');
+      setError(e.message || 'Erro ao carregar revisões');
     } finally {
       setIsLoading(false);
     }
@@ -133,6 +136,20 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
     }
   };
 
+  const handleGuiaReviewed = async (guia: PendingGuia, approve: boolean) => {
+    setMarking(prev => ({ ...prev, [guia.guia_id]: true }));
+    try {
+      if (approve) await markGuiaReviewed(guia.guia_id, currentUser.id);
+      else await markGuiaRejected(guia.guia_id, currentUser.id);
+      setGuias(prev => prev.filter(g => g.guia_id !== guia.guia_id));
+      onReviewed?.();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setMarking(prev => ({ ...prev, [guia.guia_id]: false }));
+    }
+  };
+
   const handleExpenseCategory = async (invoice: PendingInvoice, expenseCategory: string) => {
     setMarking(prev => ({ ...prev, [invoice.id]: true }));
     try {
@@ -158,9 +175,11 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-black uppercase italic tracking-tight">Faturas por Rever</h2>
+          <h2 className="text-2xl font-black uppercase italic tracking-tight">Rever Faturas e Guias</h2>
           <p className="text-sm text-slate-400 font-bold mt-1">
-            {invoices.length === 0 ? 'Tudo revisto ✓' : `${invoices.length} fatura${invoices.length !== 1 ? 's' : ''} aguarda${invoices.length === 1 ? '' : 'm'} revisão`}
+            {invoices.length === 0 && guias.length === 0
+              ? 'Tudo revisto ✓'
+              : [invoices.length > 0 && `${invoices.length} fatura${invoices.length !== 1 ? 's' : ''}`, guias.length > 0 && `${guias.length} guia${guias.length !== 1 ? 's' : ''}`].filter(Boolean).join(' · ') + ' pendente' + (invoices.length + guias.length !== 1 ? 's' : '')}
           </p>
         </div>
         <button onClick={load} className="p-3 bg-white border border-slate-200 rounded-2xl hover:border-orange-300 transition-all">
@@ -172,15 +191,75 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
         <div className="bg-red-50 border border-red-100 rounded-2xl p-4 text-red-600 text-sm font-bold">{error}</div>
       )}
 
-      {invoices.length === 0 && !error && (
+      {invoices.length === 0 && guias.length === 0 && !error && (
         <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-16 text-center">
           <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-6">
             <CheckCircle className="text-emerald-500" size={40} />
           </div>
           <h3 className="text-xl font-black uppercase text-slate-800 mb-2">Tudo revisto!</h3>
-          <p className="text-slate-400 font-bold text-sm">Não há faturas pendentes de revisão.</p>
+          <p className="text-slate-400 font-bold text-sm">Não há faturas nem guias pendentes.</p>
         </div>
       )}
+
+      {/* Guias de saída pendentes */}
+      {guias.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Guias de Saída / Quebra</p>
+          {guias.map(guia => {
+            const isExit = guia.movement_type === 'SAIDA';
+            const isBusy = marking[guia.guia_id];
+            return (
+              <div key={guia.guia_id} className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+                <div className="p-5 flex items-start gap-4">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${isExit ? 'bg-blue-50' : 'bg-red-50'}`}>
+                    {isExit ? <ArrowRightLeft size={18} className="text-blue-500" /> : <Trash2 size={18} className="text-red-500" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div>
+                        <p className="font-black text-slate-900">{isExit ? 'Saída de Stock' : 'Registo de Quebra'}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mt-0.5">
+                          {new Date(guia.created_at).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </div>
+                      <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-lg shrink-0 ${isExit ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'}`}>
+                        {guia.item_count} artigo{guia.item_count !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <div className="space-y-1 mb-3">
+                      {guia.items.map(item => (
+                        <div key={item.id} className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" />
+                          <span className="truncate">{item.name}</span>
+                          <span className="text-slate-400 shrink-0">{item.quantity} {item.unit}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleGuiaReviewed(guia, false)}
+                        disabled={isBusy}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-[10px] font-black uppercase transition-colors disabled:opacity-40"
+                      >
+                        <X size={12} /> Rejeitar
+                      </button>
+                      <button
+                        onClick={() => handleGuiaReviewed(guia, true)}
+                        disabled={isBusy}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase transition-colors disabled:opacity-40"
+                      >
+                        <Check size={12} /> Aprovar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {invoices.length > 0 && <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Faturas</p>}
 
       <div className="space-y-3">
         {invoices.map(inv => {
