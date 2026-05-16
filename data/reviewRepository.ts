@@ -20,6 +20,7 @@ export interface PendingInvoice {
   ai_total_tokens?: number;
   ai_thinking_tokens?: number;
   ai_attempts?: number;
+  ai_read_failed?: boolean;
   reviewed_at?: string;
   reviewed_by?: string;
   reviewed_by_name?: string;
@@ -113,6 +114,10 @@ export async function markGuiaReviewed(guiaId: string, userId: string): Promise<
 
 export async function markGuiaRejected(guiaId: string, userId: string): Promise<void> {
   await apiPost(`/api/review/guias/${guiaId}/rejected`, { userId });
+}
+
+export async function reanalyzeInvoice(id: string): Promise<{ itemCount: number }> {
+  return apiPost(`/api/review/${id}/reanalyze`, {});
 }
 
 export async function subscribePush(subscription: PushSubscription, userId: string): Promise<void> {

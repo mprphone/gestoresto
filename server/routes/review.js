@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import { query, withTransaction } from '../db.js';
 import { audit } from '../audit.js';
+import { analyzeInvoiceImages } from '../geminiAnalyze.js';
+import fs from 'fs/promises';
+import path from 'path';
+import { config } from '../config.js';
 
 export const reviewRouter = Router();
 
@@ -148,7 +152,7 @@ reviewRouter.get('/pending', async (req, res, next) => {
         pi.id, pi.doc_number, pi.document_type, pi.supplier_name, pi.supplier_nif,
         pi.total_amount, pi.date_issued, pi.created_at,
         pi.has_qr_code, pi.qr_code_text, pi.qr_total_amount, pi.total_validation_status, pi.expense_category, pi.is_missing_pages,
-        pi.ai_model, pi.ai_input_tokens, pi.ai_output_tokens, pi.ai_total_tokens, pi.ai_thinking_tokens, pi.ai_attempts,
+        pi.ai_read_failed, pi.ai_model, pi.ai_input_tokens, pi.ai_output_tokens, pi.ai_total_tokens, pi.ai_thinking_tokens, pi.ai_attempts,
         pi.reviewed_at, pi.reviewed_by,
         u.name as reviewed_by_name,
         count(pil.id)::int as line_count,
@@ -478,6 +482,83 @@ reviewRouter.post('/guias/:guiaId/rejected', async (req, res, next) => {
       where guia_id = $1 and restaurant_id = $3
     `, [req.params.guiaId, userId || null, req.restaurantId]);
     res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/review/:id/reanalyze — run Gemini on archived images and save lines
+reviewRouter.post('/:id/reanalyze', async (req, res, next) => {
+  try {
+    // Fetch invoice and its archived image documents
+    const invoiceRes = await query(
+      'SELECT * FROM purchase_invoices WHERE id = $1 AND restaurant_id = $2',
+      [req.params.id, req.restaurantId]
+    );
+    if (!invoiceRes.rows[0]) return res.status(404).json({ error: 'Fatura não encontrada' });
+    const invoice = invoiceRes.rows[0];
+
+    const docsRes = await query(`
+      SELECT id, storage_path, mime_type, original_filename
+      FROM digital_archive_documents
+      WHERE invoice_id = $1 AND mime_type LIKE 'image/%'
+      ORDER BY created_at ASC
+    `, [req.params.id]);
+
+    if (docsRes.rows.length === 0) {
+      return res.status(400).json({ error: 'Sem imagens arquivadas para re-análise.' });
+    }
+
+    // Read images from disk and convert to base64 data URLs
+    const images = [];
+    for (const doc of docsRes.rows) {
+      const absPath = path.isAbsolute(doc.storage_path)
+        ? doc.storage_path
+        : path.join(config.archiveRoot, doc.storage_path);
+      const buffer = await fs.readFile(absPath);
+      images.push(`data:${doc.mime_type};base64,${buffer.toString('base64')}`);
+    }
+
+    // Call Gemini
+    const geminiResult = await analyzeInvoiceImages(images);
+
+    if (!geminiResult.items || geminiResult.items.length === 0) {
+      return res.status(422).json({ error: 'A IA não conseguiu extrair artigos desta imagem. Tente melhorar a qualidade da foto.' });
+    }
+
+    // Save lines and clear ai_read_failed flag in a transaction
+    await withTransaction(async client => {
+      // Delete any existing lines (from previous failed attempts)
+      await client.query('DELETE FROM purchase_invoice_lines WHERE invoice_id = $1', [req.params.id]);
+
+      for (const [i, item] of geminiResult.items.entries()) {
+        await client.query(`
+          INSERT INTO purchase_invoice_lines (
+            invoice_id, line_number, original_name, quantity_original, unit_original,
+            quantity_stock, unit_stock, unit_price, total_price, vat_rate, expiry_date, notes
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        `, [
+          req.params.id, i + 1, item.name,
+          Number(item.quantity) || 1, item.unit || 'un',
+          Number(item.quantity) || 1, item.unit || 'un',
+          Number(item.unitPrice) || 0, Number(item.totalPrice) || 0,
+          Number(item.vatRate) || null,
+          item.expiryDate ? item.expiryDate.slice(0, 10) : null,
+          null
+        ]);
+      }
+
+      await client.query(`
+        UPDATE purchase_invoices
+        SET ai_read_failed = false,
+            ai_model = $2, ai_total_tokens = $3
+        WHERE id = $1
+      `, [req.params.id, geminiResult.aiUsage?.model || null, geminiResult.aiUsage?.totalTokens || null]);
+
+      await audit(client, req, 'reanalyze', 'purchase_invoices', req.params.id, invoice, { itemCount: geminiResult.items.length });
+    });
+
+    res.json({ ok: true, itemCount: geminiResult.items.length, geminiResult });
   } catch (err) {
     next(err);
   }

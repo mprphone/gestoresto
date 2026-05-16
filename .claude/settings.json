@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(curl -s http://localhost:8790/api/health)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(sudo -u postgres psql gestoresto -c ' *)"
     ]
   }
 }

@@ -519,7 +519,7 @@ invoicesRouter.post('/', async (req, res, next) => {
           primary_archive_document_id, has_qr_code, has_atcud, atcud,
           image_quality_ok, is_missing_pages,
           qr_code_text, qr_total_amount, calculated_lines_total, total_validation_status, total_validation_notes,
-          compliance_notes, ai_model, ai_input_tokens, ai_output_tokens, ai_total_tokens, ai_thinking_tokens, ai_attempts, expense_category
+          compliance_notes, ai_model, ai_input_tokens, ai_output_tokens, ai_total_tokens, ai_thinking_tokens, ai_attempts, expense_category, ai_read_failed
         )
         values (
           $1,
@@ -528,7 +528,7 @@ invoicesRouter.post('/', async (req, res, next) => {
           $11, $12, coalesce($13, current_date), $14, coalesce($15::invoice_status, 'PENDENTE'::invoice_status), coalesce($16, 0), $17,
           $18, $19, $20, $21, $22, $23,
           $24, $25, $26, $27, $28,
-          $29, $30, $31, $32, $33, $34, $35, $36
+          $29, $30, $31, $32, $33, $34, $35, $36, coalesce($37, false)
         )
         returning *
       `, [
@@ -548,7 +548,8 @@ invoicesRouter.post('/', async (req, res, next) => {
         payload.aiUsage?.totalTokens ?? null,
         payload.aiUsage?.thinkingTokens ?? null,
         payload.aiUsage?.attempts ?? null,
-        payload.expenseCategory || null
+        payload.expenseCategory || null,
+        payload.aiReadFailed ? true : null
       ]);
 
       if (!invoice.rows[0]) {

@@ -431,6 +431,44 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
   const confirmEntryRef = useRef(confirmEntry);
   useEffect(() => { confirmEntryRef.current = confirmEntry; });
 
+  const sendToReview = async () => {
+    if (pages.length === 0 || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const sourcePages = originalPages.length > 0 ? originalPages : pages.map(p => `data:image/jpeg;base64,${p}`);
+      const invoicePhotos = sourcePages.map(p => p.startsWith('data:') ? p : `data:image/jpeg;base64,${p}`);
+      await Promise.resolve(onComplete(
+        [],
+        invoicePhotos[0],
+        { name: supplier || 'Fornecedor', nif: nif || qrData?.supplierNif || '' },
+        {
+          docNumber: qrData?.documentNumber || docNumber || 'S/N',
+          documentType: qrData?.documentType,
+          dateIssued: qrData?.documentDate,
+          totalAmount: qrData?.totalAmount || 0,
+          customerNif: qrData?.customerNif,
+          qrCodeText: qrPayloads[0] || undefined,
+          aiReadFailed: true,
+          digitalCompliance: {
+            hasQrCode: qrPayloads.length > 0,
+            hasAtcud: Boolean(qrData?.atcud),
+            atcud: qrData?.atcud,
+            isCompliant: qrPayloads.length > 0,
+            imageQualityOk: pageQualities.some(q => q.isReadable),
+            isMissingPages: false,
+            complianceNotes: 'IA não conseguiu ler os artigos — requer re-análise'
+          }
+        },
+        invoicePhotos
+      ));
+      resetEntry();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const canSendToReview = pages.length > 0 && (qrPayloads.length > 0 || pageQualities.some(q => q.isReadable));
+
 
   const matchedItemsCount = extractedData ? extractedData.items.filter((_, idx) => mapping[idx]).length : 0;
   const totalItemsCount = extractedData?.items.length || 0;
@@ -608,9 +646,19 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                          Tentar novamente
                        </button>
                        <button onClick={() => fileInputRef.current?.click()} className="px-6 py-3 bg-white border border-slate-200 text-slate-700 rounded-2xl font-black uppercase text-[10px] hover:border-orange-500 transition-all">
-                         Escolher outra foto
+                         Outra foto
                        </button>
+                       {canSendToReview && (
+                         <button onClick={sendToReview} disabled={isSubmitting} className="px-6 py-3 bg-orange-500 text-white rounded-2xl font-black uppercase text-[10px] hover:bg-orange-600 disabled:opacity-40 transition-all">
+                           {isSubmitting ? 'A enviar…' : 'Enviar para revisão →'}
+                         </button>
+                       )}
                      </div>
+                     {canSendToReview && (
+                       <p className="text-[10px] text-slate-400 font-bold max-w-xs">
+                         A fatura{qrPayloads.length > 0 ? ', com os dados do QR,' : ''} vai para a fila de revisão para leitura manual pelo administrador.
+                       </p>
+                     )}
                    </>
                  )}
                </div>

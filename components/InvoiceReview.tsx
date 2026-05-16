@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, Clock, RefreshCcw, FileText, AlertTriangle, Check, X, ChevronUp, Save, ArrowRightLeft, Trash2 } from 'lucide-react';
-import { PendingInvoice, PendingGuia, ReviewInvoiceLine, listPendingInvoices, listPendingGuias, listReviewInvoiceLines, markReviewed, markUnreviewed, markGuiaReviewed, markGuiaRejected, updateReviewExpenseCategory, updateReviewInvoiceLine } from '../data/reviewRepository';
+import { CheckCircle, Clock, RefreshCcw, FileText, AlertTriangle, Check, X, ChevronUp, Save, ArrowRightLeft, Trash2, Cpu } from 'lucide-react';
+import { PendingInvoice, PendingGuia, ReviewInvoiceLine, listPendingInvoices, listPendingGuias, listReviewInvoiceLines, markReviewed, markUnreviewed, markGuiaReviewed, markGuiaRejected, updateReviewExpenseCategory, updateReviewInvoiceLine, reanalyzeInvoice } from '../data/reviewRepository';
 import { listProductsPage } from '../data/productsRepository';
 import { apiGet } from '../data/apiClient';
 import { AppUser, Product } from '../types';
@@ -134,6 +134,22 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
       setError(e.message);
     } finally {
       setMarking(prev => ({ ...prev, [invoice.id]: false }));
+    }
+  };
+
+  const handleReanalyze = async (inv: PendingInvoice) => {
+    setMarking(prev => ({ ...prev, [inv.id]: true }));
+    setError(null);
+    try {
+      const result = await reanalyzeInvoice(inv.id);
+      setError(null);
+      await load(); // reload to show new lines
+      // brief success message via error field (green would need another state)
+      setError(`✓ IA releu a fatura: ${result.itemCount} artigo${result.itemCount !== 1 ? 's' : ''} extraído${result.itemCount !== 1 ? 's' : ''}. Reveja e aprove.`);
+    } catch (e: any) {
+      setError(e.message || 'Erro na re-análise. Verifique se as imagens estão arquivadas.');
+    } finally {
+      setMarking(prev => ({ ...prev, [inv.id]: false }));
     }
   };
 
@@ -368,7 +384,16 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
                     <span className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-slate-50 text-slate-500">
                       {inv.line_count} artigo{inv.line_count !== 1 ? 's' : ''}
                     </span>
-                    {inv.line_count === 0 && (
+                    {inv.ai_read_failed && inv.line_count === 0 && (
+                      <button
+                        onClick={e => { e.stopPropagation(); handleReanalyze(inv); }}
+                        disabled={!!marking[inv.id]}
+                        className="flex items-center gap-1 text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors disabled:opacity-50"
+                      >
+                        <Cpu size={10} /> {marking[inv.id] ? 'A analisar…' : 'Analisar com IA'}
+                      </button>
+                    )}
+                    {!inv.ai_read_failed && inv.line_count === 0 && (
                       <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-lg ${inv.expense_category ? 'bg-purple-50 text-purple-600' : 'bg-orange-50 text-orange-600'}`}>
                         {inv.expense_category || 'Despesa por classificar'}
                       </span>
@@ -532,7 +557,23 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
                   </div>
                 </div>
               )}
-              {isExpanded && inv.line_count === 0 && (
+              {isExpanded && inv.line_count === 0 && inv.ai_read_failed && (
+                <div className="border-t border-slate-100 bg-blue-50 p-5 flex items-start gap-3">
+                  <Cpu size={18} className="text-blue-500 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-xs font-black text-blue-800 uppercase mb-1">IA não conseguiu ler os artigos</p>
+                    <p className="text-[11px] font-bold text-blue-600 mb-3">A fatura foi arquivada com os dados do QR. Clique para que a IA tente nova leitura das imagens arquivadas.</p>
+                    <button
+                      onClick={() => handleReanalyze(inv)}
+                      disabled={!!marking[inv.id]}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase transition-colors disabled:opacity-50"
+                    >
+                      <Cpu size={14} /> {marking[inv.id] ? 'A analisar com IA…' : 'Fazer nova leitura IA'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {isExpanded && inv.line_count === 0 && !inv.ai_read_failed && (
                 <div className="border-t border-slate-100 bg-white p-4">
                   <label className="block text-[10px] font-black uppercase text-slate-400 mb-2">Tipo de despesa</label>
                   <select
@@ -548,7 +589,7 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
                   </select>
                 </div>
               )}
-              {isExpanded && archiveUrl && (
+              {isExpanded && archiveUrl && !inv.ai_read_failed && (
                 <div className="border-t border-slate-100 bg-slate-50" style={{ height: '70vh' }}>
                   <AuthenticatedArchivePreview
                     archiveDocumentId={inv.archive_id}
