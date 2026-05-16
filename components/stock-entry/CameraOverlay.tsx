@@ -132,8 +132,12 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
         <div className="flex items-center gap-2">
           <Check size={14} className="shrink-0" /> QR fiscal lido e NIF da empresa validado
         </div>
-        <p className="opacity-85">
-          Forn. {qrData.supplierNif || '-'} · Empresa {qrData.customerNif || 'sem NIF'} · Total {qrData.totalAmount ? `€ ${qrData.totalAmount.toFixed(2)}` : '-'}
+        <p className="opacity-90 normal-case font-bold leading-relaxed">
+          Forn. <strong>{qrData.supplierNif || '-'}</strong>
+          {qrData.documentNumber && <> · Nº <strong>{qrData.documentNumber}</strong></>}
+          {qrData.documentDate && <> · <strong>{new Date(qrData.documentDate + 'T00:00:00').toLocaleDateString('pt-PT')}</strong></>}
+          {qrData.totalAmount != null && <> · <strong>€ {qrData.totalAmount.toFixed(2)}</strong></>}
+          {qrData.documentType && <> · Tipo: <strong>{qrData.documentType}</strong></>}
         </p>
       </div>
     )}

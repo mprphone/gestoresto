@@ -7,6 +7,7 @@ export interface InvoiceExtractedData {
   supplierEmail?: string;
   supplierPhone?: string;
   invoiceNumber?: string;
+  invoiceDate?: string;
   documentType?: string;
   qrCodeText?: string;
   qrTotalAmount?: number;

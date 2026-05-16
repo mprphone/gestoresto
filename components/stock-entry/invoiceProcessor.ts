@@ -544,6 +544,7 @@ export const validateInvoiceTotals = (data: InvoiceExtractedData, detectedQrPayl
       supplierNif: qrData?.supplierNif || data.supplierNif,
       customerNif: qrData?.customerNif || data.customerNif,
       invoiceNumber: qrData?.documentNumber || data.invoiceNumber,
+      invoiceDate: qrData?.documentDate || data.invoiceDate,   // QR field F: is ground truth
       documentType: documentType || data.documentType,
       totalInvoiceAmount: inferredInvoiceTotal ?? 0,
       qrCodeText: qrText,

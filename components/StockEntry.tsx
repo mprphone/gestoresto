@@ -410,7 +410,7 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
         const saved = await Promise.resolve(onComplete(itemsToSubmit, invoicePhotos[0], { name: supplier, nif }, {
           docNumber,
           documentType,
-          dateIssued: qrData?.documentDate,
+          dateIssued: qrData?.documentDate || extractedData.invoiceDate,
           totalAmount: extractedData.totalInvoiceAmount,
           customerName: extractedData.customerName,
           customerNif: qrData?.customerNif || extractedData.customerNif,
@@ -537,10 +537,12 @@ const StockEntry: React.FC<StockEntryProps> = ({ products, suppliers, invoices, 
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
-                      <p>Fornecedor: <span className="font-black">{qrData.supplierNif || '-'}</span></p>
-                      <p>Empresa: <span className="font-black">{qrData.customerNif || 'sem NIF'}</span></p>
-                      <p>Documento: <span className="font-black">{qrData.documentNumber || '-'}</span></p>
-                      <p>Total: <span className="font-black">{qrData.totalAmount ? `€ ${qrData.totalAmount.toFixed(2)}` : '-'}</span></p>
+                      <p>Fornecedor NIF: <span className="font-black">{qrData.supplierNif || '-'}</span></p>
+                      <p>Empresa NIF: <span className="font-black">{qrData.customerNif || '-'}</span></p>
+                      <p>Nº Doc: <span className="font-black">{qrData.documentNumber || '-'}</span></p>
+                      <p>Data: <span className="font-black">{qrData.documentDate ? new Date(qrData.documentDate + 'T00:00:00').toLocaleDateString('pt-PT') : '-'}</span></p>
+                      <p>Total QR: <span className="font-black">{qrData.totalAmount ? `€ ${qrData.totalAmount.toFixed(2)}` : '-'}</span></p>
+                      {qrData.documentType && <p>Tipo: <span className="font-black">{qrData.documentType}</span></p>}
                       {qrData.atcud && <p className="col-span-2">ATCUD: <span className="font-black">{qrData.atcud}</span></p>}
                     </div>
                   </div>

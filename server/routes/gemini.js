@@ -31,7 +31,8 @@ Para cada artigo inclua sempre o campo "name". Para os campos numéricos (quanti
 Extraia também: código do artigo, unidade de medida, taxa de IVA, data de validade se existir, e categoria sugerida.
 
 CABEÇALHO:
-Fornecedor (nome, NIF, email, telefone), Cliente (nome, NIF), Número do documento, Tipo do documento, Total do documento.
+Fornecedor (nome, NIF, email, telefone), Cliente (nome, NIF), Número do documento, Data do documento, Tipo do documento, Total do documento.
+O campo invoiceDate deve conter a data do documento em formato YYYY-MM-DD. Se só houver mês/ano use YYYY-MM-01.
 O campo documentType deve identificar o tipo fiscal quando visível: FT, FR, FS, NC, ND, GT, GR, VD ou texto equivalente.
 Se no documento aparecer "Nota de Crédito" devolva documentType = "NC" mesmo que o número não comece por NC.
 Se aparecer "Fatura-recibo" devolva "FR"; "Fatura simplificada" devolva "FS"; "Fatura" devolva "FT".
@@ -55,6 +56,7 @@ const RESPONSE_SCHEMA = {
     supplierEmail:        { type: Type.STRING },
     supplierPhone:        { type: Type.STRING },
     invoiceNumber:        { type: Type.STRING },
+    invoiceDate:          { type: Type.STRING },
     documentType:         { type: Type.STRING },
     qrCodeText:           { type: Type.STRING },
     qrTotalAmount:        { type: Type.NUMBER },
