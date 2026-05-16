@@ -153,9 +153,9 @@ export const analyzeCanvasQuality = (canvas: HTMLCanvasElement, hasQrCode = fals
     ? documentWidthRatio <= 0.72 && documentHeightRatio <= 0.94 && documentAreaRatio <= 0.68
     : documentWidthRatio <= 0.82 && documentHeightRatio <= 0.88 && documentAreaRatio <= 0.70;
   const qualityReasons: string[] = [];
-  // A métrica é deliberadamente conservadora em folhas claras; abaixo disto a imagem
-  // costuma estar mesmo fraca, mas acima já vale a pena deixar o pipeline tentar ler.
-  if (sharpnessScore < 45) qualityReasons.push('Foto desfocada');
+  // Esta métrica tem de ser prática no balcão: QR legível e fatura completa importam
+  // mais do que nitidez perfeita. Abaixo disto costuma estar mesmo tremida.
+  if (sharpnessScore < 28) qualityReasons.push('Foto desfocada');
   if (!framingOk) qualityReasons.push(documentDetected ? 'Ajuste o enquadramento' : 'Enquadre a fatura');
   if (documentDetected && !documentMarginOk) qualityReasons.push('Mostre a fatura inteira');
   if (documentDetected && documentMarginOk && !hasArchiveBuffer) qualityReasons.push('Afaste a câmara');
