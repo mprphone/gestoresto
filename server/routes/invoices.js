@@ -16,6 +16,22 @@ function onlyDigits(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
+// Normalise any date string to YYYY-MM-DD or null.
+// Handles: YYYY-MM-DD (pass-through), YYYY-MM (append -01), YYYY (append -01-01).
+// Returns null for empty, null, or unrecognisable values.
+function normalizeDate(value) {
+  if (!value) return null;
+  const s = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;           // already full
+  if (/^\d{4}-\d{2}$/.test(s)) return `${s}-01`;          // YYYY-MM → YYYY-MM-01
+  if (/^\d{4}$/.test(s)) return `${s}-01-01`;              // YYYY → YYYY-01-01
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {                  // DD/MM/YYYY (PT format)
+    const [d, m, y] = s.split('/');
+    return `${y}-${m}-${d}`;
+  }
+  return null; // unknown format — discard rather than crash
+}
+
 function documentSerialTail(value) {
   const match = String(value || '').match(/(\d+)\s*$/);
   return match?.[1] || '';
@@ -521,7 +537,7 @@ invoicesRouter.post('/', async (req, res, next) => {
         restaurantValidation.customerName, restaurantValidation.customerNif, restaurantValidation.profileId,
         restaurantValidation.status, restaurantValidation.notes,
         payload.docNumber, payload.totalAmount,
-        payload.dateIssued, payload.dueDate, payload.status, payload.paidAmount, payload.photoUrl,
+        normalizeDate(payload.dateIssued), normalizeDate(payload.dueDate), payload.status, payload.paidAmount, payload.photoUrl,
         payload.primaryArchiveDocumentId, payload.hasQrCode, payload.hasAtcud, payload.atcud,
         payload.imageQualityOk, payload.isMissingPages,
         payload.qrCodeText, payload.qrTotalAmount, payload.calculatedLinesTotal, totalValidation.status, totalValidation.notes || null,
@@ -652,7 +668,7 @@ invoicesRouter.post('/', async (req, res, next) => {
         `, [
           invoiceId, line.lineNumber || index + 1, line.productId, line.productAliasId, line.originalName,
           line.supplierItemCode, line.quantityOriginal, line.unitOriginal, line.conversionFactor,
-          line.quantityStock, line.unitStock, line.unitPrice, line.totalPrice, line.vatRate, line.expiryDate, line.notes
+          line.quantityStock, line.unitStock, line.unitPrice, line.totalPrice, line.vatRate, normalizeDate(line.expiryDate), line.notes
         ]);
         lines.push(lineResult.rows[0]);
 
