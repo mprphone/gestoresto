@@ -5,7 +5,7 @@ import { listProductsPage, upsertProduct, deleteProduct } from './data/productsR
 import { listSuppliersPage } from './data/suppliersRepository';
 import { listInvoicesPage, listInvoiceLines, createInvoiceWithLines } from './data/invoicesRepository';
 import { listAliasesForSupplier } from './data/productAliasesRepository';
-import { listArchiveDocumentsForInvoice, uploadArchiveDocument } from './data/archiveRepository';
+import { deleteUnlinkedArchiveDocument, listArchiveDocumentsForInvoice, uploadArchiveDocument } from './data/archiveRepository';
 import { listMovementsPage, createMovement } from './data/movementsRepository';
 import { createBatchPayment, listPayments } from './data/paymentsRepository';
 import { getRestaurantProfile, saveRestaurantProfile } from './data/restaurantProfileRepository';
@@ -356,7 +356,7 @@ const App: React.FC = () => {
       };
     });
 
-    return runAction(async () => {
+    const saved = await runAction(async () => {
       await createInvoiceWithLines({
       supplierName: supplierData?.name || 'Fornecedor',
       supplierNif,
@@ -389,6 +389,10 @@ const App: React.FC = () => {
       });
       await refreshData();
     }, 'Fatura guardada com arquivo, linhas e stock atualizados.');
+    if (!saved && archiveDocuments.length > 0) {
+      await Promise.allSettled(archiveDocuments.map(doc => deleteUnlinkedArchiveDocument(doc.id)));
+    }
+    return saved;
   };
 
   const handleSaveRestaurantProfile = async (profile: RestaurantProfile) => {
@@ -436,7 +440,7 @@ const App: React.FC = () => {
         documentType: ArchiveDocumentType.PAYMENT_PROOF
       });
     }
-    await runAction(async () => {
+    const saved = await runAction(async () => {
       await createBatchPayment({
       invoiceIds: ids,
       datePaid: paymentDetails.date,
@@ -449,6 +453,9 @@ const App: React.FC = () => {
       });
       await refreshData();
     }, 'Pagamento registado.');
+    if (!saved && proofArchive?.id) {
+      await deleteUnlinkedArchiveDocument(proofArchive.id).catch(() => undefined);
+    }
   };
 
   if (!currentUser) {

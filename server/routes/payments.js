@@ -65,6 +65,11 @@ paymentsRouter.post('/batch', async (req, res, next) => {
           error.status = 409;
           throw error;
         }
+        if (invoice.document_type === 'NC') {
+          const error = new Error(`A nota de crédito ${invoice.doc_number || invoiceId} não pode ser liquidada como pagamento.`);
+          error.status = 409;
+          throw error;
+        }
 
         const due = Math.max(0, Number(invoice.total_amount) - Number(invoice.paid_amount || 0));
         const payThis = remaining === null ? due : Math.min(due, Math.max(0, remaining));

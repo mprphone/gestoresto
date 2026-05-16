@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, Clock, RefreshCcw, FileText, AlertTriangle, Check, X, ChevronDown, ChevronUp } from 'lucide-react';
-import { PendingInvoice, listPendingInvoices, markReviewed, markUnreviewed, updateReviewExpenseCategory } from '../data/reviewRepository';
+import { CheckCircle, Clock, RefreshCcw, FileText, AlertTriangle, Check, X, ChevronUp, Save } from 'lucide-react';
+import { PendingInvoice, ReviewInvoiceLine, listPendingInvoices, listReviewInvoiceLines, markReviewed, markUnreviewed, updateReviewExpenseCategory, updateReviewInvoiceLine } from '../data/reviewRepository';
+import { listProductsPage } from '../data/productsRepository';
 import { apiGet } from '../data/apiClient';
-import { AppUser } from '../types';
+import { AppUser, Product } from '../types';
 import AuthenticatedArchivePreview from './AuthenticatedArchivePreview';
 
 interface InvoiceReviewProps {
@@ -19,6 +20,9 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expenseCategories, setExpenseCategories] = useState<Array<{ id: string; name: string }>>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [reviewLines, setReviewLines] = useState<Record<string, ReviewInvoiceLine[]>>({});
+  const [loadingLines, setLoadingLines] = useState<Record<string, boolean>>({});
 
   const load = async () => {
     setIsLoading(true);
@@ -41,7 +45,71 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
     apiGet<{ data: Array<{ id: string; name: string }> }>('/api/expense-categories')
       .then(result => setExpenseCategories(result.data))
       .catch(() => setExpenseCategories([]));
+    listProductsPage({ pageSize: 500 })
+      .then(result => setProducts(result.data))
+      .catch(() => setProducts([]));
   }, []);
+
+  const openInvoice = async (invoice: PendingInvoice) => {
+    const nextId = expandedId === invoice.id ? null : invoice.id;
+    setExpandedId(nextId);
+    if (!nextId || invoice.line_count === 0 || reviewLines[invoice.id]) return;
+    setLoadingLines(prev => ({ ...prev, [invoice.id]: true }));
+    try {
+      const lines = await listReviewInvoiceLines(invoice.id);
+      setReviewLines(prev => ({ ...prev, [invoice.id]: lines }));
+    } catch (e: any) {
+      setError(e.message || 'Erro ao carregar linhas da fatura.');
+    } finally {
+      setLoadingLines(prev => ({ ...prev, [invoice.id]: false }));
+    }
+  };
+
+  const updateLineDraft = (invoiceId: string, lineId: string, patch: Partial<ReviewInvoiceLine>) => {
+    setReviewLines(prev => ({
+      ...prev,
+      [invoiceId]: (prev[invoiceId] || []).map(line => {
+        if (line.id !== lineId) return line;
+        const next = { ...line, ...patch };
+        if (patch.product_id) {
+          const product = products.find(p => p.id === patch.product_id);
+          if (product) {
+            next.product_name = product.name;
+            next.unit_stock = product.unit;
+          }
+        }
+        if (patch.quantity_original !== undefined || patch.unit_price !== undefined) {
+          next.total_price = Number(next.quantity_original || 0) * Number(next.unit_price || 0);
+        }
+        return next;
+      })
+    }));
+  };
+
+  const handleSaveLine = async (invoiceId: string, line: ReviewInvoiceLine) => {
+    setMarking(prev => ({ ...prev, [line.id]: true }));
+    setError(null);
+    try {
+      await updateReviewInvoiceLine(invoiceId, line.id, {
+        productId: line.product_id || '',
+        originalName: line.original_name,
+        quantityOriginal: line.quantity_original,
+        unitOriginal: line.unit_original,
+        conversionFactor: line.conversion_factor,
+        quantityStock: line.quantity_stock,
+        unitStock: line.unit_stock,
+        unitPrice: line.unit_price,
+        totalPrice: line.total_price,
+        notes: line.notes
+      });
+      const lines = await listReviewInvoiceLines(invoiceId);
+      setReviewLines(prev => ({ ...prev, [invoiceId]: lines }));
+    } catch (e: any) {
+      setError(e.message || 'Erro ao guardar linha.');
+    } finally {
+      setMarking(prev => ({ ...prev, [line.id]: false }));
+    }
+  };
 
   const handleMark = async (invoice: PendingInvoice) => {
     if (!invoice.reviewed_at && invoice.line_count === 0 && !invoice.expense_category) {
@@ -123,6 +191,7 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
           const archiveUrl = inv.archive_id ? true : undefined;
           const isPdf = inv.archive_mime_type === 'application/pdf';
           const isCreditNote = (() => {
+            if (inv.document_type === 'NC') return true;
             const dn = (inv.doc_number || '').toUpperCase().trim();
             if (dn.startsWith('NC') || dn.startsWith('N/C')) return true;
             const qr = inv.qr_code_text || '';
@@ -139,7 +208,7 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
                 {/* Status icon — click to toggle preview */}
                 <div className="flex-shrink-0 pt-1">
                   <button
-                    onClick={() => setExpandedId(isExpanded ? null : inv.id)}
+                    onClick={() => openInvoice(inv)}
                     className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${validationOk ? 'bg-slate-100 hover:bg-slate-200' : 'bg-orange-50 hover:bg-orange-100'}`}
                     title="Ver documento"
                   >
@@ -152,7 +221,7 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
                 </div>
 
                 {/* Info */}
-                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : inv.id)}>
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openInvoice(inv)}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-black text-slate-900 truncate">{inv.supplier_name || 'Fornecedor'}</p>
@@ -173,7 +242,7 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
                   <div className="flex items-center gap-3 mt-3 flex-wrap">
                     {isCreditNote && (
                       <span className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-red-50 text-red-600 border border-red-200">
-                        ⚠ NC — Não entra em stock
+                        NC - Abate stock
                       </span>
                     )}
                     <span className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-slate-50 text-slate-500">
@@ -216,15 +285,19 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
                 <div className="flex-shrink-0">
                   <button
                     onClick={() => handleMark(inv)}
-                    disabled={isMarking}
+                    disabled={isMarking || !!inv.is_missing_pages}
                     className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${
-                      isMarking
+                      inv.is_missing_pages
+                        ? 'bg-red-100 cursor-not-allowed'
+                        : isMarking
                         ? 'bg-slate-100 cursor-wait'
                         : 'bg-emerald-500 hover:bg-emerald-400 active:scale-95 shadow-lg shadow-emerald-200'
                     }`}
-                    title="Marcar como revisto"
+                    title={inv.is_missing_pages ? 'Não pode aprovar: páginas em falta' : 'Marcar como revisto'}
                   >
-                    {isMarking
+                    {inv.is_missing_pages
+                      ? <X size={20} className="text-red-500" strokeWidth={3} />
+                      : isMarking
                       ? <RefreshCcw size={18} className="animate-spin text-slate-400" />
                       : <Check size={20} className="text-white" strokeWidth={3} />}
                   </button>
@@ -256,6 +329,87 @@ const InvoiceReview: React.FC<InvoiceReviewProps> = ({ currentUser, restaurantId
                       </tr>
                     </tbody>
                   </table>
+                </div>
+              )}
+              {isExpanded && inv.line_count > 0 && (
+                <div className="border-t border-slate-100 bg-white p-4" onClick={event => event.stopPropagation()}>
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <div>
+                      <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Linhas de stock movimentadas</p>
+                      <p className="text-xs font-bold text-slate-500 mt-1">Altere artigo ou quantidade antes de aprovar.</p>
+                    </div>
+                    {loadingLines[inv.id] && <RefreshCcw size={16} className="animate-spin text-orange-500" />}
+                  </div>
+                  <div className="space-y-3">
+                    {(reviewLines[inv.id] || []).map(line => {
+                      const isSavingLine = marking[line.id];
+                      return (
+                        <div key={line.id} className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr_0.75fr_0.75fr_auto] gap-2 p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                          <div className="space-y-1">
+                            <label className="text-[9px] font-black uppercase text-slate-400">Descrição</label>
+                            <input
+                              value={line.original_name || ''}
+                              onChange={event => updateLineDraft(inv.id, line.id, { original_name: event.target.value })}
+                              className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[9px] font-black uppercase text-slate-400">Artigo</label>
+                            <select
+                              value={line.product_id || ''}
+                              onChange={event => updateLineDraft(inv.id, line.id, { product_id: event.target.value })}
+                              className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold"
+                            >
+                              <option value="">Sem artigo</option>
+                              {products.map(product => (
+                                <option key={product.id} value={product.id}>{product.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[9px] font-black uppercase text-slate-400">Qtd stock</label>
+                            <input
+                              type="number"
+                              min="0.001"
+                              step="0.001"
+                              value={line.quantity_stock}
+                              onChange={event => updateLineDraft(inv.id, line.id, { quantity_stock: Number(event.target.value) })}
+                              className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[9px] font-black uppercase text-slate-400">Unidade</label>
+                            <input
+                              value={line.unit_stock || ''}
+                              onChange={event => updateLineDraft(inv.id, line.id, { unit_stock: event.target.value })}
+                              className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold"
+                            />
+                          </div>
+                          <div className="flex md:flex-col items-end md:items-stretch gap-2">
+                            <p className="text-[9px] font-black uppercase text-slate-400 md:text-right">
+                              {line.movement_type || 'Mov.'}<br />
+                              <span className="text-slate-700">{Number(line.movement_quantity || line.quantity_stock || 0).toFixed(3)}</span>
+                            </p>
+                            <button
+                              onClick={() => handleSaveLine(inv.id, line)}
+                              disabled={isSavingLine || !line.product_id}
+                              className={`px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center justify-center gap-2 ${
+                                isSavingLine || !line.product_id
+                                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                                  : 'bg-slate-900 text-white hover:bg-orange-500'
+                              }`}
+                            >
+                              {isSavingLine ? <RefreshCcw size={14} className="animate-spin" /> : <Save size={14} />}
+                              Guardar
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {!loadingLines[inv.id] && (reviewLines[inv.id] || []).length === 0 && (
+                      <p className="text-xs font-bold text-slate-400 p-3">Sem linhas de stock nesta fatura.</p>
+                    )}
+                  </div>
                 </div>
               )}
               {isExpanded && inv.line_count === 0 && (

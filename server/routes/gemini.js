@@ -127,7 +127,9 @@ geminiRouter.post('/analyze-invoice', async (req, res, next) => {
         const msg = String(err?.message || '');
         const retryable = err?.status === 503 || msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('overloaded');
         if (retryable && attempt < 2) {
-          console.log(`[gemini] 503 attempt ${attempt + 1}/3, retrying in ${retryDelays[attempt]}ms`);
+          if (process.env.NODE_ENV !== 'production') {
+            console.log(`[gemini] 503 attempt ${attempt + 1}/3, retrying in ${retryDelays[attempt]}ms`);
+          }
           await new Promise(r => setTimeout(r, retryDelays[attempt]));
           continue;
         }
@@ -156,7 +158,9 @@ geminiRouter.post('/analyze-invoice', async (req, res, next) => {
       attempts: 1
     };
 
-    console.log(`[gemini] analyzed ${images.length} image(s), items=${parsed.items.length}, model=${config.geminiModel}, ms=${Date.now() - startedAt}`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[gemini] analyzed ${images.length} image(s), items=${parsed.items.length}, model=${config.geminiModel}, ms=${Date.now() - startedAt}`);
+    }
     res.json(parsed);
   } catch (error) {
     console.error('Gemini analyze error:', error);

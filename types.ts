@@ -104,6 +104,7 @@ export interface PurchaseInvoice {
   supplierId: string;
   supplierName: string;
   supplierNif: string;
+  documentType?: string;
   customerName?: string;
   customerNif?: string;
   restaurantProfileId?: string;

@@ -17,6 +17,11 @@ async function assertRelatedEntityBelongsToRestaurant(client, table, id, restaur
       where p.id = $1 and pi.restaurant_id = $2
     `, [id, restaurantId]);
     if (result.rows[0]) return;
+  } else if (table === 'digital_archive_documents') {
+    const result = await client.query('select id from digital_archive_documents where id = $1 and restaurant_id = $2', [id, restaurantId]);
+    if (result.rows[0]) return;
+  } else if (table === 'reports') {
+    if (id === 'daily-summary') return;
   } else {
     const error = new Error('Tipo de entidade relacionada inválido.');
     error.status = 400;

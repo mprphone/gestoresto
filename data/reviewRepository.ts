@@ -3,6 +3,7 @@ import { apiGet, apiPost } from './apiClient';
 export interface PendingInvoice {
   id: string;
   doc_number: string;
+  document_type?: string;
   supplier_name: string;
   supplier_nif: string;
   total_amount: number;
@@ -28,9 +29,57 @@ export interface PendingInvoice {
   archive_filename?: string;
 }
 
+export interface ReviewInvoiceLine {
+  id: string;
+  invoice_id: string;
+  line_number: number;
+  product_id?: string;
+  product_name?: string;
+  original_name: string;
+  quantity_original: number;
+  unit_original: string;
+  conversion_factor: number;
+  quantity_stock: number;
+  unit_stock: string;
+  unit_price: number;
+  total_price: number;
+  notes?: string;
+  movement_id?: string;
+  movement_type?: string;
+  movement_quantity?: number;
+}
+
 export async function listPendingInvoices(): Promise<PendingInvoice[]> {
   const result = await apiGet<{ data: PendingInvoice[] }>('/api/review/pending');
   return result.data;
+}
+
+export async function listReviewInvoiceLines(id: string): Promise<ReviewInvoiceLine[]> {
+  const result = await apiGet<{ data: any[] }>(`/api/review/${id}/lines`);
+  return result.data.map(row => ({
+    ...row,
+    quantity_original: Number(row.quantity_original || 0),
+    conversion_factor: Number(row.conversion_factor || 1),
+    quantity_stock: Number(row.quantity_stock || 0),
+    unit_price: Number(row.unit_price || 0),
+    total_price: Number(row.total_price || 0),
+    movement_quantity: row.movement_quantity === null || row.movement_quantity === undefined ? undefined : Number(row.movement_quantity)
+  }));
+}
+
+export async function updateReviewInvoiceLine(invoiceId: string, lineId: string, payload: {
+  productId: string;
+  originalName?: string;
+  quantityOriginal?: number;
+  unitOriginal?: string;
+  conversionFactor?: number;
+  quantityStock: number;
+  unitStock?: string;
+  unitPrice?: number;
+  totalPrice?: number;
+  notes?: string;
+}): Promise<void> {
+  await apiPost(`/api/review/${invoiceId}/lines/${lineId}`, payload);
 }
 
 export async function markReviewed(id: string, userId: string): Promise<void> {

@@ -10,6 +10,7 @@ export interface PageQuality {
   documentHeightRatio: number;
   documentAspectRatio: number;
   documentDetected: boolean;
+  documentMarginOk: boolean;
   isLongReceipt: boolean;
   qualityReasons: string[];
   isReadable: boolean;
@@ -116,7 +117,7 @@ export const analyzeCanvasQuality = (canvas: HTMLCanvasElement, hasQrCode = fals
   const x = Math.max(0, Math.floor((canvas.width - sampleWidth) / 2));
   const y = Math.max(0, Math.floor((canvas.height - sampleHeight) / 2));
   const data = ctx?.getImageData(x, y, sampleWidth, sampleHeight).data;
-  if (!data) return { sharpness: 0, sharpnessScore: 0, brightness: 0, documentAreaRatio: 0, documentWidthRatio: 0, documentHeightRatio: 0, documentAspectRatio: 0, documentDetected: false, isLongReceipt: false, qualityReasons: ['Não foi possível avaliar a imagem'], isReadable: false, hasQrCode };
+  if (!data) return { sharpness: 0, sharpnessScore: 0, brightness: 0, documentAreaRatio: 0, documentWidthRatio: 0, documentHeightRatio: 0, documentAspectRatio: 0, documentDetected: false, documentMarginOk: false, isLongReceipt: false, qualityReasons: ['Não foi possível avaliar a imagem'], isReadable: false, hasQrCode };
 
   let brightness = 0;
   let edge = 0;
@@ -143,15 +144,21 @@ export const analyzeCanvasQuality = (canvas: HTMLCanvasElement, hasQrCode = fals
   const documentHeightRatio = document.heightRatio;
   const documentAspectRatio = document.aspectRatio;
   const documentDetected = documentWidthRatio > 0 && documentHeightRatio > 0;
+  const documentMarginOk = document.marginOk;
   const isLongReceipt = documentAspectRatio >= 2.2;
   const framingOk = isLongReceipt
     ? documentWidthRatio >= 0.2 && documentHeightRatio >= 0.7
     : documentWidthRatio >= 0.42 && documentHeightRatio >= 0.42;
+  const hasArchiveBuffer = isLongReceipt
+    ? documentWidthRatio <= 0.72 && documentHeightRatio <= 0.94 && documentAreaRatio <= 0.68
+    : documentWidthRatio <= 0.82 && documentHeightRatio <= 0.88 && documentAreaRatio <= 0.70;
   const qualityReasons: string[] = [];
   // A métrica é deliberadamente conservadora em folhas claras; abaixo disto a imagem
   // costuma estar mesmo fraca, mas acima já vale a pena deixar o pipeline tentar ler.
   if (sharpnessScore < 45) qualityReasons.push('Foto desfocada');
   if (!framingOk) qualityReasons.push(documentDetected ? 'Ajuste o enquadramento' : 'Enquadre a fatura');
+  if (documentDetected && !documentMarginOk) qualityReasons.push('Mostre a fatura inteira');
+  if (documentDetected && documentMarginOk && !hasArchiveBuffer) qualityReasons.push('Afaste a câmara');
   if (!(avgBrightness > 15 && avgBrightness < 254)) qualityReasons.push('Luz inadequada');
   return {
     sharpness,
@@ -162,6 +169,7 @@ export const analyzeCanvasQuality = (canvas: HTMLCanvasElement, hasQrCode = fals
     documentHeightRatio,
     documentAspectRatio,
     documentDetected,
+    documentMarginOk,
     isLongReceipt,
     qualityReasons,
     isReadable: qualityReasons.length === 0,
@@ -173,7 +181,7 @@ export const normalizeInvoiceImage = (base64: string): Promise<{ data: string; q
   return new Promise((resolve) => {
     const img = new Image();
     img.src = base64;
-    img.onerror = () => resolve({ data: base64.split(',')[1] || base64, quality: { sharpness: 0, sharpnessScore: 0, brightness: 0, documentAreaRatio: 0, documentWidthRatio: 0, documentHeightRatio: 0, documentAspectRatio: 0, documentDetected: false, isLongReceipt: false, qualityReasons: ['Falha ao ler imagem'], isReadable: false, hasQrCode: false }, width: 0, height: 0 });
+    img.onerror = () => resolve({ data: base64.split(',')[1] || base64, quality: { sharpness: 0, sharpnessScore: 0, brightness: 0, documentAreaRatio: 0, documentWidthRatio: 0, documentHeightRatio: 0, documentAspectRatio: 0, documentDetected: false, documentMarginOk: false, isLongReceipt: false, qualityReasons: ['Falha ao ler imagem'], isReadable: false, hasQrCode: false }, width: 0, height: 0 });
     img.onload = () => {
       const MAX_WIDTH = 2000;
       const scale = Math.min(1, MAX_WIDTH / img.width);
@@ -262,13 +270,18 @@ export interface CropProposal {
   widthRatio: number;
   heightRatio: number;
   aspectRatio: number;
+  marginOk: boolean;
+  leftMarginRatio: number;
+  rightMarginRatio: number;
+  topMarginRatio: number;
+  bottomMarginRatio: number;
   reason: string;
 }
 
 export const detectDocumentCrop = (canvas: HTMLCanvasElement): CropProposal => {
   const W = canvas.width;
   const H = canvas.height;
-  const fallback: CropProposal = { cropX: 0, cropY: 0, cropW: W, cropH: H, sourceW: W, sourceH: H, confidence: 0, areaRatio: 0, widthRatio: 0, heightRatio: 0, aspectRatio: 0, reason: 'fallback' };
+  const fallback: CropProposal = { cropX: 0, cropY: 0, cropW: W, cropH: H, sourceW: W, sourceH: H, confidence: 0, areaRatio: 0, widthRatio: 0, heightRatio: 0, aspectRatio: 0, marginOk: false, leftMarginRatio: 0, rightMarginRatio: 0, topMarginRatio: 0, bottomMarginRatio: 0, reason: 'fallback' };
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx || W === 0 || H === 0) return fallback;
 
@@ -327,7 +340,7 @@ export const detectDocumentCrop = (canvas: HTMLCanvasElement): CropProposal => {
   const heightRatio = dH / H;
   const areaRatio = (dW * dH) / (W * H);
   const aspectRatio = dH / Math.max(1, dW);
-  const marginsOk = leftM > 0.04 && rightM > 0.04 && topM > 0.03 && bottomM > 0.03;
+  const marginsOk = leftM > 0.035 && rightM > 0.035 && topM > 0.025 && bottomM > 0.025;
   const areaOk = areaRatio > 0.12 && areaRatio < 0.88;
   const hasCrop = areaRatio < 0.88;
 
@@ -344,14 +357,32 @@ export const detectDocumentCrop = (canvas: HTMLCanvasElement): CropProposal => {
   const cropW = Math.min(W - cropX, dW + padX * 2);
   const cropH = Math.min(H - cropY, dH + padY * 2);
 
-  return { cropX, cropY, cropW, cropH, sourceW: W, sourceH: H, confidence, areaRatio, widthRatio, heightRatio, aspectRatio, reason: notes.join('+') };
+  return {
+    cropX,
+    cropY,
+    cropW,
+    cropH,
+    sourceW: W,
+    sourceH: H,
+    confidence,
+    areaRatio,
+    widthRatio,
+    heightRatio,
+    aspectRatio,
+    marginOk: marginsOk,
+    leftMarginRatio: leftM,
+    rightMarginRatio: rightM,
+    topMarginRatio: topM,
+    bottomMarginRatio: bottomM,
+    reason: notes.join('+')
+  };
 };
 
 export const normalizeWithoutCrop = (base64: string): Promise<{ data: string; quality: PageQuality; width: number; height: number }> => {
   return new Promise((resolve) => {
     const img = new Image();
     img.src = base64;
-    img.onerror = () => resolve({ data: base64.split(',')[1] || base64, quality: { sharpness: 0, sharpnessScore: 0, brightness: 0, documentAreaRatio: 0, documentWidthRatio: 0, documentHeightRatio: 0, documentAspectRatio: 0, documentDetected: false, isLongReceipt: false, qualityReasons: ['Falha ao ler imagem'], isReadable: false, hasQrCode: false }, width: 0, height: 0 });
+    img.onerror = () => resolve({ data: base64.split(',')[1] || base64, quality: { sharpness: 0, sharpnessScore: 0, brightness: 0, documentAreaRatio: 0, documentWidthRatio: 0, documentHeightRatio: 0, documentAspectRatio: 0, documentDetected: false, documentMarginOk: false, isLongReceipt: false, qualityReasons: ['Falha ao ler imagem'], isReadable: false, hasQrCode: false }, width: 0, height: 0 });
     img.onload = () => {
       const MAX_WIDTH = 2000;
       const scale = Math.min(1, MAX_WIDTH / img.width);

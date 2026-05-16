@@ -29,6 +29,23 @@ function normalizeDocNumber(value) {
     .replace(/[^a-z0-9]+/g, '');
 }
 
+function meaningfulSupplierName(name, supplierNif) {
+  const value = String(name || '').trim();
+  if (!value) return '';
+  const normalizedNif = onlyDigits(supplierNif);
+  const compact = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (compact === 'FORNECEDOR') return '';
+  if (normalizedNif && compact === `FORNECEDOR NIF ${normalizedNif}`) return '';
+  if (/^FORNECEDOR NIF \d+$/.test(compact)) return '';
+  if (compact === 'FORNECEDOR POR REVER') return '';
+  return value;
+}
+
 function safeFileName(value) {
   return String(value || 'documento')
     .normalize('NFD')
@@ -390,12 +407,9 @@ function inferDocumentType(payload) {
   return undefined;
 }
 
-// Detects credit/debit notes by explicit type, doc number prefix or negative total
 function isCreditNote(payload) {
   const documentType = inferDocumentType(payload);
-  const doc = normalizeDocumentType(payload.docNumber);
-  return documentType === 'NC' || documentType === 'ND' || doc.startsWith('NC') || doc.startsWith('ND') || doc.startsWith('NA') ||
-    Number(payload.totalAmount || 0) < 0;
+  return documentType === 'NC' || Number(payload.totalAmount || 0) < 0;
 }
 
 invoicesRouter.post('/', async (req, res, next) => {
@@ -404,18 +418,14 @@ invoicesRouter.post('/', async (req, res, next) => {
     payload.documentType = payload.documentType || inferDocumentType(payload);
     const isCredit = isCreditNote(payload);
     if (!isCredit) preferFiscalQrTotal(payload);
-    // For credit notes, negate quantities and total so stock is reduced
     if (isCredit) {
-      payload.totalAmount = -Math.abs(Number(payload.totalAmount || 0));
-      // Clear QR total so validation doesn't mismatch with negated invoice total
-      payload.qrTotalAmount = undefined;
-      payload.totalValidationStatus = 'NAO_VERIFICADO';
+      payload.totalAmount = Math.abs(Number(payload.totalAmount || 0));
       if (Array.isArray(payload.lines)) {
         payload.lines = payload.lines.map(line => ({
           ...line,
-          quantityOriginal: -Math.abs(Number(line.quantityOriginal || 0)),
-          quantityStock: -Math.abs(Number(line.quantityStock || 0)),
-          totalPrice: -Math.abs(Number(line.totalPrice || 0))
+          quantityOriginal: Math.abs(Number(line.quantityOriginal || 0)),
+          quantityStock: Math.abs(Number(line.quantityStock || 0)),
+          totalPrice: Math.abs(Number(line.totalPrice || 0))
         }));
       }
     }
@@ -429,6 +439,10 @@ invoicesRouter.post('/', async (req, res, next) => {
       res.status(400).json({ error: `O valor pago (€ ${paidAmount.toFixed(2)}) não pode exceder o total da fatura (€ ${totalAmount.toFixed(2)}).` });
       return;
     }
+    if (payload.isMissingPages && (paidAmount > 0 || payload.status === 'PAGO' || payload.status === 'PARCIAL')) {
+      res.status(409).json({ error: 'A fatura tem páginas em falta e não pode ser aprovada nem paga.' });
+      return;
+    }
     const saved = await withTransaction(async client => {
       const restaurantValidation = await validateRestaurantCustomer(client, payload, req.restaurantId);
       const totalValidation = validateInvoiceTotals(payload);
@@ -436,6 +450,7 @@ invoicesRouter.post('/', async (req, res, next) => {
       let supplierId = payload.supplierId || null;
       if (!supplierId && payload.supplierNif) {
         const normalizedSupplierNif = onlyDigits(payload.supplierNif);
+        const cleanSupplierName = meaningfulSupplierName(payload.supplierName, normalizedSupplierNif);
         const existingSupplier = await client.query(`
           select *
           from suppliers
@@ -455,7 +470,7 @@ invoicesRouter.post('/', async (req, res, next) => {
               where id = $6
               returning *
             `, [
-              payload.supplierName || existingSupplier.rows[0].name || 'Fornecedor',
+              cleanSupplierName || existingSupplier.rows[0].name || `Fornecedor NIF ${normalizedSupplierNif}`,
               normalizedSupplierNif,
               payload.supplierEmail || null,
               payload.supplierPhone || null,
@@ -467,7 +482,7 @@ invoicesRouter.post('/', async (req, res, next) => {
               values ($1, $2, $3, $4, coalesce($5, 30), $6)
               returning *
             `, [
-              payload.supplierName || 'Fornecedor',
+              cleanSupplierName || `Fornecedor NIF ${normalizedSupplierNif}`,
               normalizedSupplierNif,
               payload.supplierEmail || null,
               payload.supplierPhone || null,
@@ -481,7 +496,7 @@ invoicesRouter.post('/', async (req, res, next) => {
       const invoice = await client.query(`
         insert into purchase_invoices (
           restaurant_id,
-          supplier_id, supplier_name, supplier_nif,
+          supplier_id, supplier_name, supplier_nif, document_type,
           customer_name, customer_nif, restaurant_profile_id, restaurant_match_status, restaurant_match_notes,
           doc_number, total_amount,
           date_issued, due_date, status, paid_amount, photo_url,
@@ -492,16 +507,17 @@ invoicesRouter.post('/', async (req, res, next) => {
         )
         values (
           $1,
-          $2, $3, $4, $5, $6, $7, $8, $9,
-          $10, $11, coalesce($12, current_date), $13, coalesce($14::invoice_status, 'PENDENTE'::invoice_status), coalesce($15, 0), $16,
-          $17, $18, $19, $20, $21, $22,
-          $23, $24, $25, $26, $27,
-          $28, $29, $30, $31, $32, $33, $34, $35
+          $2, $3, $4, $5,
+          $6, $7, $8, $9, $10,
+          $11, $12, coalesce($13, current_date), $14, coalesce($15::invoice_status, 'PENDENTE'::invoice_status), coalesce($16, 0), $17,
+          $18, $19, $20, $21, $22, $23,
+          $24, $25, $26, $27, $28,
+          $29, $30, $31, $32, $33, $34, $35, $36
         )
         returning *
       `, [
         req.restaurantId,
-        supplierId, payload.supplierName, onlyDigits(payload.supplierNif),
+        supplierId, payload.supplierName, onlyDigits(payload.supplierNif), payload.documentType || null,
         restaurantValidation.customerName, restaurantValidation.customerNif, restaurantValidation.profileId,
         restaurantValidation.status, restaurantValidation.notes,
         payload.docNumber, payload.totalAmount,
@@ -645,14 +661,15 @@ invoicesRouter.post('/', async (req, res, next) => {
         if (product) {
           const currentStock = Number(product.current_stock || 0);
           const averagePrice = Number(product.average_price || 0);
-          const quantityStock = Number(line.quantityStock || 0);
+          const quantityStock = Math.abs(Number(line.quantityStock || 0));
+          const signedQuantityStock = isCredit ? -quantityStock : quantityStock;
           const unitPrice = Number(line.unitPrice || 0);
           const currentValue = currentStock * averagePrice;
-          const incomingValue = Number(line.quantityOriginal || 0) * unitPrice;
-          const totalStock = currentStock + quantityStock;
+          const incomingValue = Math.abs(Number(line.quantityOriginal || 0)) * unitPrice;
+          const totalStock = currentStock + signedQuantityStock;
           const stockDeficit = totalStock < 0 ? Math.abs(totalStock) : 0;
           const nextStock = Math.max(0, totalStock);
-          const newAveragePrice = quantityStock < 0
+          const newAveragePrice = isCredit
             ? averagePrice
             : (nextStock > 0 ? (currentValue + incomingValue) / nextStock : unitPrice);
           const stockCorrectionNote = stockDeficit > 0
@@ -764,17 +781,25 @@ invoicesRouter.post('/', async (req, res, next) => {
         ].filter(Boolean).join(' · ');
         await client.query(`
           insert into movements (restaurant_id, product_id, invoice_line_id, type, quantity, price, supplier_id, supplier_name, notes)
-          values ($1, $2, $3, 'ENTRADA'::movement_type, $4, $5, $6, $7, $8)
+          values ($1, $2, $3, $4::movement_type, $5, $6, $7, $8, $9)
         `, [
           req.restaurantId,
           line.productId,
           lineResult.rows[0].id,
-          line.quantityStock,
+          isCredit ? 'SAÍDA (REPOSIÇÃO)' : 'ENTRADA',
+          Math.abs(Number(line.quantityStock || 0)),
           line.unitPrice,
           supplierId,
           payload.supplierName,
           movementNotes
         ]);
+      }
+
+      if ((payload.lines || []).length > 0) {
+        await client.query(
+          'update purchase_invoices set stock_applied_at = coalesce(stock_applied_at, now()) where id = $1',
+          [invoiceId]
+        );
       }
 
       await audit(client, req, 'create', 'purchase_invoices', invoiceId, null, { ...invoice.rows[0], lines });
@@ -837,6 +862,10 @@ invoicesRouter.post('/', async (req, res, next) => {
     });
     res.status(201).json(saved);
   } catch (error) {
+    if (error.code === '23505') {
+      error.statusCode = 409;
+      error.message = 'Fatura duplicada: já existe um documento fiscal igual neste restaurante.';
+    }
     next(error);
   }
 });

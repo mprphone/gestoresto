@@ -1,5 +1,5 @@
 import { ArchiveDocumentType, DigitalArchiveDocument } from '../types';
-import { apiGet, apiPostForm, apiUrl } from './apiClient';
+import { apiDelete, apiGet, apiPostForm, apiUrl } from './apiClient';
 import { PageOptions, PageResult } from './pagination';
 
 const fromDb = (row: any): DigitalArchiveDocument => ({
@@ -68,4 +68,8 @@ export async function uploadArchiveDocument(input: {
   if (input.notes) form.append('notes', input.notes);
   const row = await apiPostForm<any>('/api/archive/upload', form);
   return fromDb(row);
+}
+
+export async function deleteUnlinkedArchiveDocument(id: string): Promise<void> {
+  await apiDelete(`/api/archive/${id}`);
 }

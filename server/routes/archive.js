@@ -73,6 +73,30 @@ archiveRouter.get('/file/:id', async (req, res, next) => {
   }
 });
 
+archiveRouter.delete('/:id', async (req, res, next) => {
+  try {
+    const result = await query(`
+      delete from digital_archive_documents
+      where id = $1
+        and restaurant_id = $2
+        and invoice_id is null
+        and payment_id is null
+      returning storage_path
+    `, [req.params.id, req.restaurantId]);
+    const storagePath = result.rows[0]?.storage_path;
+    if (!storagePath) {
+      res.status(404).json({ error: 'document not found or already linked' });
+      return;
+    }
+    await fs.unlink(storagePath).catch(error => {
+      if (error.code !== 'ENOENT') throw error;
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 archiveRouter.post('/upload', upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) {

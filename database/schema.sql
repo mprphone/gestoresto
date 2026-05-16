@@ -267,6 +267,7 @@ create table if not exists purchase_invoices (
   supplier_id uuid references suppliers(id) on delete set null,
   supplier_name text not null,
   supplier_nif text not null,
+  document_type text,
   normalized_supplier_nif text generated always as (regexp_replace(coalesce(supplier_nif, ''), '\D', '', 'g')) stored,
   customer_name text,
   customer_nif text,
@@ -298,6 +299,7 @@ create table if not exists purchase_invoices (
     check (total_validation_status in ('VALIDO','ALERTA','NAO_VERIFICADO')),
   total_validation_notes text,
   compliance_notes text,
+  stock_applied_at timestamptz,
   ai_model text,
   ai_input_tokens integer,
   ai_output_tokens integer,
@@ -315,7 +317,20 @@ alter table purchase_invoices
 create index if not exists invoices_supplier_date_idx on purchase_invoices (supplier_nif, date_issued desc, id desc);
 create index if not exists invoices_status_due_idx on purchase_invoices (status, due_date, id desc);
 create index if not exists invoices_date_pagination_idx on purchase_invoices (date_issued desc, id desc);
-create unique index if not exists invoices_unique_supplier_doc on purchase_invoices (supplier_nif, doc_number);
+create unique index if not exists invoices_restaurant_supplier_doc_unique
+  on purchase_invoices (restaurant_id, supplier_nif, doc_number)
+  where restaurant_id is not null;
+create unique index if not exists invoices_restaurant_normalized_supplier_doc_unique
+  on purchase_invoices (restaurant_id, normalized_supplier_nif, normalized_doc_number)
+  where restaurant_id is not null
+    and normalized_supplier_nif <> ''
+    and normalized_doc_number <> '';
+create unique index if not exists invoices_restaurant_qr_unique
+  on purchase_invoices (restaurant_id, qr_code_text)
+  where restaurant_id is not null and qr_code_text is not null and qr_code_text <> '';
+create unique index if not exists invoices_restaurant_atcud_unique
+  on purchase_invoices (restaurant_id, atcud)
+  where restaurant_id is not null and atcud is not null and atcud <> '';
 create index if not exists invoices_supplier_doc_normalized_idx
   on purchase_invoices (normalized_supplier_nif, normalized_doc_number)
   where normalized_supplier_nif <> '' and normalized_doc_number <> '';
@@ -334,6 +349,8 @@ alter table purchase_invoices
   add column if not exists calculated_lines_total numeric(14,2),
   add column if not exists total_validation_status text not null default 'NAO_VERIFICADO',
   add column if not exists total_validation_notes text,
+  add column if not exists document_type text,
+  add column if not exists stock_applied_at timestamptz,
   add column if not exists ai_model text,
   add column if not exists ai_input_tokens integer,
   add column if not exists ai_output_tokens integer,

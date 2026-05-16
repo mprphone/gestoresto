@@ -93,6 +93,8 @@ export async function runMigrations() {
     `alter table products add column if not exists restaurant_id uuid`,
     `alter table suppliers add column if not exists restaurant_id uuid`,
     `alter table purchase_invoices add column if not exists restaurant_id uuid`,
+    `alter table purchase_invoices add column if not exists document_type text`,
+    `alter table purchase_invoices add column if not exists stock_applied_at timestamptz`,
     `alter table purchase_invoices add column if not exists ai_model text`,
     `alter table purchase_invoices add column if not exists ai_input_tokens integer`,
     `alter table purchase_invoices add column if not exists ai_output_tokens integer`,
@@ -104,6 +106,18 @@ export async function runMigrations() {
   ]) {
     await query(sql).catch(() => {});
   }
+
+  await query(`
+    update purchase_invoices pi
+    set stock_applied_at = coalesce(pi.stock_applied_at, pi.created_at, now())
+    where stock_applied_at is null
+      and exists (
+        select 1
+        from purchase_invoice_lines pil
+        join movements m on m.invoice_line_id = pil.id
+        where pil.invoice_id = pi.id
+      )
+  `).catch(() => {});
 
   await query(`drop index if exists products_name_unit_unique`).catch(() => {});
   await query(`

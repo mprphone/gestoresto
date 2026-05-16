@@ -7,6 +7,7 @@ const invoiceFromDb = (row: any): PurchaseInvoice => ({
   supplierId: row.supplier_id || 'manual',
   supplierName: row.supplier_name,
   supplierNif: row.supplier_nif,
+  documentType: row.document_type || undefined,
   customerName: row.customer_name || undefined,
   customerNif: row.customer_nif || undefined,
   restaurantProfileId: row.restaurant_profile_id || undefined,

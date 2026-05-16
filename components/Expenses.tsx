@@ -6,6 +6,8 @@ import { apiPost, apiPostForm } from '../data/apiClient';
 import { RestaurantProfile } from '../types';
 import { analyzeCanvasQuality, cropDetectedDocumentForArchive, normalizeWithoutCrop, PageQuality, parsePortugueseQrData, scanQrFromCanvas, scanQrPayloads } from './stock-entry/invoiceProcessor';
 import { checkInvoiceDuplicate } from '../data/invoicesRepository';
+import { listSuppliersPage } from '../data/suppliersRepository';
+import { processInvoiceImage, InvoiceExtractedData } from '../geminiService';
 
 interface ExpensesProps {
   onSaved?: () => void;
@@ -33,6 +35,9 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
   const [liveQuality, setLiveQuality] = useState<PageQuality | null>(null);
   const [capturedQualities, setCapturedQualities] = useState<PageQuality[]>([]);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  const [supplierNamesByNif, setSupplierNamesByNif] = useState<Record<string, string>>({});
+  const [expenseAiData, setExpenseAiData] = useState<InvoiceExtractedData | null>(null);
+  const [isAnalyzingName, setIsAnalyzingName] = useState(false);
 
   const [isSaving,      setIsSaving]      = useState(false);
   const [saved,         setSaved]         = useState(false);
@@ -51,6 +56,56 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
   const qualityMessage = (quality: PageQuality) => {
     const reasons = getExpenseQualityReasons(quality);
     return `${reasons.join(' · ') || 'Foto sem qualidade suficiente'}. Nitidez ${quality.sharpnessScore}%.`;
+  };
+
+  useEffect(() => {
+    listSuppliersPage({ pageSize: 500 })
+      .then(result => {
+        setSupplierNamesByNif(Object.fromEntries(
+          result.data
+            .filter(supplier => supplier.nif && supplier.name)
+            .map(supplier => [String(supplier.nif).replace(/\D/g, ''), supplier.name])
+        ));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const fallbackSupplierName = (supplierNif?: string) =>
+    supplierNif ? `Fornecedor NIF ${supplierNif}` : 'Fornecedor por rever';
+
+  const resolveSupplierName = (supplierNif?: string, candidate?: string) => {
+    const cleanNif = String(supplierNif || '').replace(/\D/g, '');
+    const knownName = cleanNif ? supplierNamesByNif[cleanNif] : '';
+    const candidateName = String(candidate || '').trim();
+    return candidateName || knownName || fallbackSupplierName(cleanNif);
+  };
+
+  const rememberSupplierName = (supplierNif?: string, name?: string) => {
+    const cleanNif = String(supplierNif || '').replace(/\D/g, '');
+    const cleanName = String(name || '').trim();
+    if (!cleanNif || !cleanName || cleanName === fallbackSupplierName(cleanNif)) return;
+    setSupplierNamesByNif(prev => ({ ...prev, [cleanNif]: cleanName }));
+    setSupplier(cleanName);
+  };
+
+  const enrichFromImage = async (dataUrl: string, fallbackNif?: string) => {
+    setIsAnalyzingName(true);
+    try {
+      const data = await processInvoiceImage([dataUrl]);
+      if (!data) return;
+      setExpenseAiData(data);
+      const detectedNif = String(data.supplierNif || '').replace(/\D/g, '');
+      const activeNif = detectedNif || fallbackNif || nif || qrDocuments[0]?.supplierNif || '';
+      if (data.supplierName) rememberSupplierName(activeNif, data.supplierName);
+      if (data.supplierName) setSupplier(data.supplierName);
+      if (detectedNif) setNif(detectedNif);
+      if (data.invoiceNumber) setDocNumber(data.invoiceNumber);
+      if (data.totalInvoiceAmount) setAmount(String(data.totalInvoiceAmount));
+    } catch (error) {
+      // Nome por IA é uma melhoria; a despesa continua guardável com o QR.
+    } finally {
+      setIsAnalyzingName(false);
+    }
   };
 
   // ── Camera helpers ──────────────────────────────────────────
@@ -120,7 +175,7 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
     setDocNumber(parsed.documentNumber || '');
     if (parsed.totalAmount) setAmount(String(parsed.totalAmount));
     if (parsed.documentDate) setDate(parsed.documentDate);
-    setSupplier(parsed.supplierNif ? `Fornecedor NIF ${parsed.supplierNif}` : 'Fornecedor por rever');
+    setSupplier(resolveSupplierName(parsed.supplierNif));
 
     const restNif = String(restaurantProfile?.nif || '').replace(/\D/g, '');
     const buyerNif = String(parsed.customerNif || '').replace(/\D/g, '');
@@ -208,6 +263,7 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
     setCapturedImgs(prev => [...prev, archivePage]);
     setCapturedQualities(prev => [...prev, normalized.quality]);
     closeCamera();
+    await enrichFromImage(rawDataUrl, qrDocuments[0]?.supplierNif);
   };
   useEffect(() => { captureRef.current = capture; });
 
@@ -226,6 +282,7 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
       const archivePage = await cropDetectedDocumentForArchive(dataUrl);
       setCapturedImgs(prev => [...prev, archivePage]);
       setCapturedQualities(prev => [...prev, normalized.quality]);
+      await enrichFromImage(dataUrl, parsePortugueseQrData(payloads[0]).supplierNif);
     };
     reader.readAsDataURL(file);
   };
@@ -250,8 +307,10 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
       }
       for (const [index, qr] of qrDocuments.entries()) {
         await apiPost('/api/invoices', {
-          supplierName: qr.supplierNif ? `Fornecedor NIF ${qr.supplierNif}` : supplier.trim(),
+          supplierName: resolveSupplierName(qr.supplierNif, qrDocuments.length === 1 ? supplier : supplierNamesByNif[String(qr.supplierNif || '').replace(/\D/g, '')]),
           supplierNif: qr.supplierNif,
+          supplierEmail: expenseAiData?.supplierEmail,
+          supplierPhone: expenseAiData?.supplierPhone,
           customerNif: qr.customerNif,
           docNumber: qr.documentNumber || `DEP-${Date.now()}-${index + 1}`,
           documentType: qr.documentType,
@@ -271,12 +330,15 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
           hasAtcud: !!qr.atcud,
           imageQualityOk: capturedQualities.every(quality => isExpenseArchiveReadable(quality)),
           totalValidationStatus: 'NAO_VERIFICADO',
+          aiUsage: expenseAiData?.aiUsage,
+          ocrJson: expenseAiData,
           lines: [],
         });
       }
       setSaved(true);
       setSupplier(''); setNif(''); setDocNumber('');
       setAmount(''); setQrDocuments([]);
+      setExpenseAiData(null);
       setCapturedImgs([]);
       setCapturedQualities([]);
       setDuplicateWarning(null);
@@ -314,7 +376,7 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
       {/* Adaptive invoice guide */}
       {isCameraReady && (
         <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center px-7 py-28">
-          <div className={`w-full ${liveQuality?.isLongReceipt ? 'max-w-[16rem]' : 'max-w-sm'} h-full max-h-[70vh] rounded-3xl border-4 border-dashed transition-all duration-300 ${
+          <div className={`w-full ${liveQuality?.isLongReceipt ? 'max-w-[12rem]' : 'max-w-[17.5rem]'} h-full max-h-[62vh] rounded-3xl border-4 border-dashed transition-all duration-300 ${
             liveQuality?.isReadable ? 'border-emerald-400' : 'border-white/60'
           }`} />
         </div>
@@ -429,6 +491,11 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
                 <QrCode size={16} /> {qrDocuments.length} QR fiscal{qrDocuments.length !== 1 ? 'is' : ''} lido{qrDocuments.length !== 1 ? 's' : ''}
               </div>
             )}
+            {isAnalyzingName && (
+              <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-100 rounded-2xl text-slate-500 text-xs font-black">
+                <RefreshCcw size={16} className="animate-spin" /> A tentar ler o nome do fornecedor por IA…
+              </div>
+            )}
             {qrNifMismatch && (
               <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-2xl text-red-700">
                 <X size={18} className="shrink-0 mt-0.5" />
@@ -465,6 +532,11 @@ const Expenses: React.FC<ExpensesProps> = ({ onSaved, restaurantProfile }) => {
       {qrReady && (
         <div className="bg-white rounded-[2.5rem] p-6 border border-slate-200 shadow-sm">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Dados fiscais do QR</p>
+          <div className="mb-4 p-3 rounded-2xl bg-slate-50 border border-slate-100">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fornecedor</p>
+            <p className="text-sm font-black text-slate-900 mt-1">{supplier || resolveSupplierName(qrDocuments[0]?.supplierNif)}</p>
+            {isAnalyzingName && <p className="text-[10px] font-bold text-slate-400 mt-1">A confirmar nome por IA…</p>}
+          </div>
           <div className="grid grid-cols-2 gap-3 text-xs font-bold text-slate-600">
             {qrDocuments.map((qr, index) => (
               <React.Fragment key={qr.rawText}>

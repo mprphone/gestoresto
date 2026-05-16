@@ -61,15 +61,15 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, invoiceLines, p
     return invoices
       .filter(i => i.status !== InvoiceStatus.PAID)
       .reduce((acc, curr) => {
-        // Credit notes (negative total) reduce the pending balance
-        if (curr.totalAmount < 0) return acc + curr.totalAmount;
+        // Credit notes reduce the pending balance.
+        if (curr.documentType === 'NC' || curr.totalAmount < 0) return acc - Math.abs(curr.totalAmount);
         return acc + Math.max(0, curr.totalAmount - (curr.paidAmount || 0));
       }, 0);
   }, [invoices]);
 
   const toggleSelect = (id: string) => {
     const invoice = invoices.find(inv => inv.id === id);
-    if (!invoice || invoice.status === InvoiceStatus.PAID) return;
+    if (!invoice || invoice.status === InvoiceStatus.PAID || invoice.digitalCompliance?.isMissingPages || invoice.documentType === 'NC') return;
 
     setSelectedIds(prev => 
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
@@ -104,7 +104,7 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, invoiceLines, p
 
   const handleSelectAll = () => {
     const allPendingIds = filtered
-      .filter(inv => inv.status !== InvoiceStatus.PAID)
+      .filter(inv => inv.status !== InvoiceStatus.PAID && !inv.digitalCompliance?.isMissingPages && inv.documentType !== 'NC')
       .map(inv => inv.id);
     
     if (selectedIds.length === allPendingIds.length) {
@@ -160,7 +160,7 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, invoiceLines, p
                 onClick={handleSelectAll}
                 className="p-2 text-slate-400 hover:text-slate-900 transition-colors flex items-center gap-2"
               >
-                {selectedIds.length > 0 && selectedIds.length === filtered.filter(f => f.status !== InvoiceStatus.PAID).length ? 
+                {selectedIds.length > 0 && selectedIds.length === filtered.filter(f => f.status !== InvoiceStatus.PAID && !f.digitalCompliance?.isMissingPages && f.documentType !== 'NC').length ?
                   <CheckSquare size={20} className="text-orange-500" /> : <Square size={20} />
                 }
                 <span className="text-[10px] font-black uppercase tracking-widest">Selecionar Tudo</span>
@@ -184,14 +184,16 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, invoiceLines, p
             {filtered.map(inv => {
               const isSelected = selectedIds.includes(inv.id);
               const isPaid = inv.status === InvoiceStatus.PAID;
+              const isBlocked = !!inv.digitalCompliance?.isMissingPages;
+              const isCredit = inv.documentType === 'NC';
               return (
                 <tr 
                   key={inv.id} 
-                  onClick={() => !isPaid && toggleSelect(inv.id)}
-                  className={`group transition-colors cursor-pointer ${isSelected ? 'bg-orange-50/50' : 'hover:bg-slate-50/50'}`}
+                  onClick={() => !isPaid && !isBlocked && !isCredit && toggleSelect(inv.id)}
+                  className={`group transition-colors ${isBlocked ? 'cursor-not-allowed bg-red-50/30' : 'cursor-pointer'} ${isSelected ? 'bg-orange-50/50' : 'hover:bg-slate-50/50'}`}
                 >
                   <td className="px-6 py-4">
-                    {!isPaid && (
+                    {!isPaid && !isBlocked && !isCredit && (
                       <div className={`transition-colors ${isSelected ? 'text-orange-500' : 'text-slate-200 group-hover:text-slate-300'}`}>
                         {isSelected ? <CheckSquare size={20} /> : <Square size={20} />}
                       </div>
@@ -205,6 +207,11 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, invoiceLines, p
                           {inv.expenseCategory}
                         </span>
                       )}
+                      {isBlocked && (
+                        <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-100 flex-shrink-0">
+                          Páginas em falta
+                        </span>
+                      )}
                     </div>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{inv.docNumber}</p>
                   </td>
@@ -215,15 +222,15 @@ const PurchasesList: React.FC<PurchasesListProps> = ({ invoices, invoiceLines, p
                      </div>
                   </td>
                   <td className="px-6 py-4">
-                    <p className={`font-black ${inv.totalAmount < 0 ? 'text-emerald-600' : 'text-slate-900'}`}>
+                    <p className={`font-black ${isCredit ? 'text-emerald-600' : 'text-slate-900'}`}>
                       € {inv.totalAmount.toFixed(2)}
                     </p>
-                    {inv.totalAmount < 0 && (
+                    {isCredit && (
                       <p className="text-[9px] font-black uppercase text-emerald-600">Nota de Crédito</p>
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    {inv.totalAmount < 0 ? (
+                    {isCredit ? (
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-[9px] font-black uppercase">
                         Crédito
                       </span>
