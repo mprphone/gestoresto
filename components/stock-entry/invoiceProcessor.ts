@@ -152,13 +152,18 @@ export const analyzeCanvasQuality = (canvas: HTMLCanvasElement, hasQrCode = fals
   const hasArchiveBuffer = isLongReceipt
     ? documentWidthRatio <= 0.72 && documentHeightRatio <= 0.94 && documentAreaRatio <= 0.68
     : documentWidthRatio <= 0.82 && documentHeightRatio <= 0.88 && documentAreaRatio <= 0.70;
+  const a4LooksCompleteEnough = !isLongReceipt
+    && framingOk
+    && documentWidthRatio <= 0.96
+    && documentHeightRatio <= 0.96
+    && documentAreaRatio <= 0.86;
   const qualityReasons: string[] = [];
   // Esta métrica tem de ser prática no balcão: QR legível e fatura completa importam
   // mais do que nitidez perfeita. Abaixo disto costuma estar mesmo tremida.
   if (sharpnessScore < 28) qualityReasons.push('Foto desfocada');
   if (!framingOk) qualityReasons.push(documentDetected ? 'Ajuste o enquadramento' : 'Enquadre a fatura');
-  if (documentDetected && !documentMarginOk) qualityReasons.push('Mostre a fatura inteira');
-  if (documentDetected && documentMarginOk && !hasArchiveBuffer) qualityReasons.push('Afaste a câmara');
+  if (documentDetected && !documentMarginOk && !a4LooksCompleteEnough) qualityReasons.push('Mostre a fatura inteira');
+  if (documentDetected && documentMarginOk && !hasArchiveBuffer && !a4LooksCompleteEnough) qualityReasons.push('Afaste a câmara');
   if (!(avgBrightness > 15 && avgBrightness < 254)) qualityReasons.push('Luz inadequada');
   return {
     sharpness,
